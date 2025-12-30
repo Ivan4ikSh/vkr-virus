@@ -182,18 +182,19 @@ namespace SAVE {
     }
 }
 
-// Функция для получения текущего времени в формате [HH:MM:SS]
-string GetCurrentTime() {
-    auto now = chrono::system_clock::now();
-    auto time_t = chrono::system_clock::to_time_t(now);
-    auto tm = *localtime(&time_t);
+namespace LOG {
+    string GetCurrentTime() {
+        auto now = chrono::system_clock::now();
+        auto time_t = chrono::system_clock::to_time_t(now);
+        auto tm = *localtime(&time_t);
 
-    stringstream ss;
-    ss << "[" << put_time(&tm, "%H:%M:%S") << "]";
-    return ss.str();
+        stringstream ss;
+        ss << "[" << put_time(&tm, "%H:%M:%S") << "]";
+        return ss.str();
+    }
+
+    void Log(const string& stage, const string& function_name, const string& process_name) {
+        cout << GetCurrentTime() << " : " << stage << " " << function_name << " " << process_name << endl;
+    }
 }
 
-// Функция логгирования
-void Log(const string& stage, const string& function_name, const string& process_name) {
-    cout << GetCurrentTime() << " : " << stage << " " << function_name << " " << process_name << endl;
-}
