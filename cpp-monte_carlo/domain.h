@@ -1,200 +1,100 @@
 #pragma once
+
 #include <algorithm>
 #include <chrono>
-#include <cmath>
+#include <execution>
+#include <filesystem>
 #include <fstream>
-#include <functional>
 #include <iomanip>
 #include <iostream>
-#include <memory>
 #include <numeric>
-#include <sstream>
-#include <stdexcept>
+#include <random>
 #include <string>
 #include <vector>
 
 using namespace std;
 
-namespace RANDOM {
-    uint32_t Hash(uint32_t state) {
-        state ^= 2747636219u;
-        state *= 2654435769u;
-        state ^= state >> 16;
-        state *= 2654435769u;
-        state ^= state >> 16;
-        return state * 2654435769u;
-    }
-
-    float ScaleToRange01(uint32_t value) {
-        return static_cast<float>(Hash(value)) / 4294967295.0f;
-    }
-}
-
 namespace CONST {
     const double PI = 3.1415926535897932;
-    const bool YES_GENEALOGY = true;
 }
 
-enum class Distribution {
-    CONSTANT,      // Все мутации имеют одинаковый эффект
-    EXPONENTIAL,   // Экспоненциальное распределение
-    HALF_GAUSSIAN, // Полу-гауссово распределение
-    UNIFORM        // Равномерное распределение
+// Типы распределений для коэффициентов отбора
+enum DistributionType {
+    EXPONENTIAL,    // Экспоненциальное: s = -s0 * log(rand)
+    CONSTANT,       // Постоянное: s = s0
+    HALF_GAUSSIAN   // Полугауссово: s = s0 * sqrt(pi/2) * abs(randn)
 };
 
-struct Args {
-    Distribution dist_s;            // distribution_s - одно из распределений
-    double recomb_cnt;              // r - частота рекомбинаций на геном
-    int cross_cnt;                  // M - число кроссинговеров
-    double adaptive_landscape;      // s0 - средний коэффициент отбора
-    int locus_cnt;                  // L - число локусов
-    int population_cnt;             // N - численность популяции
-    int full_time_in_epoch;         // tf - полное время в поколениях
-    double start_good_allele_freq;  // f0 - начальная частота благоприятного аллеля
-    double mutation_freq;           // muL - частота мутаций на геном
+// Структура для хранения всех параметров симуляции
+struct StartParams {
+    // Основные параметры
+    int N;                    // Размер популяции
+    int L;                    // Количество локусов
+    double s0;                // Средний коэффициент отбора
+    double r;                 // Частота рекомбинаций
+    double f0;                // Начальная частота благоприятного аллеля
+    double muL;               // Частота мутаций на геном
+    int tf;                   // Полное время в поколениях
+    int M;                    // Число кроссинговеров
 
-    string exp_name;
+    // Распределение коэффициентов отбора
+    DistributionType distribution;
+
+    // Флаги и дополнительные параметры
+    bool track_genealogy;// Отслеживать генеалогию
+    string exp_name;     // Имя эксперимента
+    string output_dir;   // Директория для сохранения файлов
+    string plot_dir;     // Директория для сохранения графиков
+
+    // Конструктор с параметрами по умолчанию
+    StartParams() :
+        N(500), L(200), s0(0.1), r(0), f0(0), muL(0.01), tf(100), M(3),
+        distribution(DistributionType::CONSTANT),
+        track_genealogy(false),
+        output_dir("results"), plot_dir("graphics"),
+        exp_name("default_experiment") {
+    }
 };
 
-namespace DATA {
-    struct Population {
-        vector<double> s;  // коэффициенты отбора
-        vector<vector<int>> A;  // матрица предков
-        vector<vector<int>> K;  // бинарные последовательности ДНК
+struct SimulationParams {
+    // Вычисленные параметры
+    double mu;      // частота мутаций на локус
+    vector<int> T;  // времена (0, 1, 2, ..., tf)
+    // Массив коэффициентов отбора для каждого локуса
+    vector<double> s;
+    // Аналитическая и численная скорости адаптации
+    double V_an;
+    double V_num;
+    // Настройки для графиков/анализа
+    int t_int;           // интервал времени для графиков
+    double f_sample;     // процент выборки для пар
+    // Состояние популяции
+    vector<vector<int>> K;     // бинарные последовательности ДНК (N x L)
+    vector<vector<int>> A;     // матрица предков (N x L)
+    vector<vector<int>> P;     // матрица родителей (N x L)
+    // Для временного хранения новых состояний
+    vector<vector<int>> K_new;
+    vector<vector<int>> A_new;
+    vector<vector<int>> P_new;
+    // Наблюдаемые величины во времени
+    vector<vector<double>> W;       // приспособленности (N x (tf+1))
+    vector<vector<int>> P1;         // родители для 1-го локуса (N x (tf+1))
+    vector<vector<int>> PL;         // родители для последнего локуса (N x (tf+1))
+    vector<vector<double>> f_site;  // частоты аллелей по локусам ((tf+1) x L)
+    vector<double> k_av;            // среднее число аллелей на геном
+    vector<double> V_ark;           // дисперсия числа аллелей
+    vector<double> f_survive;       // доля выживших
+    vector<double> C;               // доля пар с общим предком
+    vector<double> C_all;           // ?
+    vector<double> mean_W;          // средняя приспособленность
 
-        // Временные данные
-        vector<vector<double>> W;  // приспособленность
-        vector<vector<double>> P1, PL;  // метки родителей
-        vector<vector<double>> fsite;  // частота аллелей по локусам
-
-        // Статистики
-        vector<double> kav, Vark, fsurvive, C, Call, meanW;
-
-        // Новые поколения
-        vector<vector<int>> Knew, Anew, Pnew;
-
-        // Параметры
-        int tint = 0;  // интервал времени для графиков
-        double fsample = 0.0;  // процент выборки для пар
-        double mu = 0;  // частота мутаций на локус
-    };
-
-    struct Output {
-        vector<double> time_points;
-        vector<double> kav;
-        vector<double> Vark;
-        vector<double> fsurvive;
-        vector<double> C;
-        vector<double> Call;
-        vector<double> meanW;
-        vector<vector<double>> fitness_histograms;
-        vector<vector<double>> fsite;
-        double theoretical_velocity;
-
-        vector<int> histogram_times; // времена для гистограмм
-        vector<string> histogram_colors; // цвета для гистограмм
-    };
-}
-
-namespace SAVE {
-    void Statistics(const DATA::Output& output, const Args& params, const std::string& filename) {
-        std::ofstream file(filename);
-        if (!file.is_open()) {
-            std::cerr << "Ошибка открытия файла: " << filename << std::endl;
-            return;
-        }
-
-        // Простой заголовок без специальных символов
-        file << "Time,kav,Vark,fsurvive,C,Call,meanW\n";
-        for (size_t i = 0; i < output.time_points.size(); ++i) {
-            file << output.time_points[i] << ","
-                << output.kav[i] << ","
-                << output.Vark[i] << ","
-                << output.fsurvive[i] << ","
-                << output.C[i] << ","
-                << output.Call[i] << ","
-                << output.meanW[i] << "\n";
-        }
-        file.close();
-    }
-
-    void FitnessHistograms(const DATA::Output& output, const string& filename) {
-        ofstream file(filename);
-        if (file.is_open()) {
-            // Сохраняем данные для построения бегущей волны
-            for (size_t i = 0; i < output.fitness_histograms.size(); ++i) {
-                file << output.histogram_times[i] << "," << output.histogram_colors[i];
-                const auto& hist = output.fitness_histograms[i];
-                for (size_t j = 0; j < hist.size(); j += 2) {
-                    file << "," << hist[j] << "," << hist[j + 1]; // bin_center, frequency
-                }
-                file << "\n";
-            }
-        }
-    }
-
-    void AlleleFrequencies(const DATA::Output& output, const std::string& filename) {
-        std::ofstream file(filename);
-        if (!file.is_open()) {
-            std::cerr << "Ошибка открытия файла: " << filename << std::endl;
-            return;
-        }
-
-        // Заголовок
-        file << "Time";
-        for (size_t locus = 0; locus < output.fsite[0].size(); ++locus) {
-            file << ",Locus" << locus + 1;
-        }
-        file << "\n";
-
-        // Данные
-        for (size_t t = 0; t < output.fsite.size(); ++t) {
-            file << output.time_points[t];
-            for (size_t locus = 0; locus < output.fsite[t].size(); ++locus) {
-                file << "," << output.fsite[t][locus];
-            }
-            file << "\n";
-        }
-        file.close();
-    }
-
-    void Parameters(const Args& params, double theoretical_velocity, const string& filename) {
-        ofstream file(filename);
-        if (file.is_open()) {
-            file << "theoretical_velocity=" << theoretical_velocity << endl;
-            file << "N=" << params.population_cnt << endl;
-            file << "L=" << params.locus_cnt << endl;
-            file << "s0=" << params.adaptive_landscape << endl;
-            file << "r=" << params.recomb_cnt << endl;
-            file << "f0=" << params.start_good_allele_freq << endl;
-            file << "muL=" << params.mutation_freq << endl;
-            file << "tf=" << params.full_time_in_epoch << endl;
-            file << "M=" << params.cross_cnt << endl;
-            file << "run=1" << endl;
-            file << "distribution_s=";
-            switch (params.dist_s) {
-            case Distribution::CONSTANT: file << "const" << endl; break;
-            case Distribution::EXPONENTIAL: file << "exponential" << endl; break;
-            case Distribution::HALF_GAUSSIAN: file << "halfgaussian" << endl; break;
-            default: file << "constant" << endl; break;
-            }
-        }
-    }
-}
-
-namespace LOG {
-    string GetCurrentTime() {
-        auto now = chrono::system_clock::now();
-        auto time_t = chrono::system_clock::to_time_t(now);
-        auto tm = *localtime(&time_t);
-
-        stringstream ss;
-        ss << "[" << put_time(&tm, "%H:%M:%S") << "]";
-        return ss.str();
-    }
-
-    void Log(const string& stage, const string& function_name, const string& process_name) {
-        cout << GetCurrentTime() << " : " << stage << " " << function_name << " " << process_name << endl;
-    }
-}
-
+    string colors;
+    vector<double> dist_over_L;             // добавьте это для хранения dist/L
+    vector<double> f1_site;                 // теоретические частоты
+    vector<vector<double>> fitness_hist_xx; // центры бинов для гистограмм
+    vector<vector<double>> fitness_hist_nn; // высоты бинов
+    vector<int> hist_times;                 // моменты времени для гистограмм
+    vector<vector<double>> freq_hist_xx;    // центры бинов для частот
+    vector<vector<double>> freq_hist_nn;    // высоты бинов для частот
+    vector<int> freq_hist_times;            // моменты времени для гистограмм частот
+};
