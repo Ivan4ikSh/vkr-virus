@@ -1,6 +1,4 @@
-function [TMRCA, adapt] = recomb_train(distribution_s, r, M, s0, L, N, tf, f0, muL, run, exp_name)
-
-global yesgenealogy
+function [TMRCA, adapt] = recomb_train_fig1(distribution_s, r, M, s0, L, N, tf, f0, muL, run, exp_name)
 
 %% Аргументы:
 % distribution_s - одно из четырех распределений ниже
@@ -57,7 +55,6 @@ V_an = compute_analytical_velocity(N, s0, L, f0, muL);
 
 A = (1:N)'*ones(1,L); % матрица предков
 tint = round(tf/10); % интервал времени для графиков
-col = 'rgbmkrgbmkrgbmkrgbmk';
 fsample = 0.1; % процент выборки для пар
 
 %% Начальная популяция
@@ -71,9 +68,6 @@ else
 end
 
 % Резервирование памяти
-W = zeros(N, length(T));  
-P1 = zeros(N, length(T)); 
-PL = P1; % Начальные метки родителей для 3 сайтов во времени, для филогении
 fsite = zeros(length(T), L);
 kav = zeros(1, length(T)); 
 Vark = kav; 
@@ -127,32 +121,6 @@ for t = T
         nprog(i) = sum(X > b1(i) & X < b2(i)); % актуальное число потомков
     end
 
-    if t <= 10  % Выводим только первые шаги
-        fprintf('DEBUG t=%d:\n', t);
-        fprintf('  w(1:5) = ');
-        fprintf('%.4f ', w(1:5)/s0);
-        fprintf('\n');
-    
-        fprintf('  nprogav = ');
-        fprintf('%.4f ', nprogav(1:5));
-        fprintf('\n');
-        % Выведем nprog для первых 5 особей
-        fprintf('  nprog(1:5) = ');
-        fprintf('%d ', nprog(1:5));
-        fprintf('\n');
-    
-        % Выведем b1, b2 для первых 5 особей
-        fprintf('  b1(1:5) = ');
-        fprintf('%.2f ', b1(1:5));
-        fprintf('\n');
-        fprintf('  b2(1:5) = ');
-        fprintf('%.2f ', b2(1:5));
-        fprintf('\n');
-    
-        % Проверим сумму nprog
-        fprintf('  sum(nprog) = %d\n', sum(nprog));
-    end
-  
     %% Обновление популяции
     is = [0; cumsum(nprog(1:(N-1)))];
     for i = 1:N
@@ -183,7 +151,7 @@ for t = T
         % рекомбинантная метка предка
         prog1A = A(i1(i),:).*first + A(i2(i),:).*(1-first);
         % рекомбинантная метка родителя
-        prog1P = P(i1(i),:).*first + P(i2(i),:).*(1-first);      
+        prog1P = P(i1(i),:).*first + P(i2(i),:).*(1-first);
         
         %% Замена родителя
         if rand > 0.5  
@@ -203,7 +171,6 @@ for t = T
     kav(t+1) = L*mean(mean(K));     % среднее число аллелей на геном
     Vark(t+1) = (std(w)/s0)^2;       % дисперсия числа аллелей между геномами
     fsurvive(t+1) = mean(~all(K==0));
-    
     % Доля пар гомологичных локусов с общим предком
     xx = round(N*fsample);
     i1 = ceil(N*rand(1,xx)); 
@@ -212,7 +179,6 @@ for t = T
     Call(t+1) = mean(~std(A));
     
     % Приспособленность всех геномов
-    W(:,t+1) = w;
     meanW(t+1) = mean(w);
     
     % Вычисление dist (генетическое разнообразие)
@@ -238,12 +204,9 @@ for t = T
             C(t+1), Call(t+1), total_alleles, min_freq, max_freq, mean_freq);
     end
     
-    %% запомнить имена родителей для 1-го и последнего локусов   
-    P1(:,t+1) = P(:,1); 
-    PL(:,t+1) = P(:,L);    
-    
     %% Построение графика волны и спектра ancestral clone в некоторые моменты времени
     if tint*round(t/tint) == t 
+        col = 'rgbmkrgbmkrgbmkrgbmk';
         c = col(round(t/tint)+1);
         figure(1)
         subplot(2,2,1)
@@ -349,142 +312,9 @@ saveas(gcf, [filename1, '.png']);
 fprintf('Численная скорость адаптации (V_num): %.4f\n', V_num);
 fprintf('Аналитическая скорость адаптации (V_an): %.4f\n', V_an);
 
-if yesgenealogy
-    %% Траектория генеалогии
-    figure(2)
-    % Выборка геномов в t=tf
-    ii = [1 N/4:N/4:N];
-    % Номера генеалогии локусы 1 и 2 
-    G1(tf+1,ii) = ii; 
-    GL(tf+1,ii) = ii;
-    for t = tf:-1:1
-        G1(t,ii) = P1(G1(t+1,ii), t+1);
-        GL(t,ii) = PL(GL(t+1,ii), t+1);
-    end
-    subplot(2,2,1)
-    plot(T, G1(:,ii)); 
-    title(ts)
-    ylabel('Родитель, локус 1')
-
-    %% Вычисление TMRCA 
-    TMRCA = tf - max(find(~std(G1(:,ii)'))); %#ok<MXFND>
-    
-    subplot(2,2,3)
-    plot(T, GL(:,ii)); 
-    xlabel('Время')
-    ylabel('Родитель, локус L')
-
-    %% Скорость адаптации за последние 3/4 временного интервала
-    t1 = round(tf/4+1); 
-    adapt = (meanW(tf+1) - meanW(t1))/(tf-t1);
-
-    %% Траектория приспособленности
-    for t = T
-        w1(t+1,ii) = W(G1(t+1,ii), t+1);
-        wL(t+1,ii) = W(GL(t+1,ii), t+1);
-    end
-    subplot(2,2,2)
-    plot(T, w1)
-    xlabel('Время')
-    ylabel('Приспособленность')
-    subplot(2,2,4)
-    plot(T, wL)
-    xlabel('Время')
-    ylabel('Приспособленность')
-    
-    %% Сохранение Figure 2
-    filename2 = sprintf('graphics/%s_fig2_run%d_N%d_L%d_s0%.3f_r%.3f', ...
-        exp_name, run, N, L, s0, r);
-    saveas(gcf, [filename2, '.png']);
-
-    %% Филогенетическое дерево
-    figure(3)
-    m = length(ii);
-    yesconnect1 = ones(size(ii)); % метка построения
-    yesconnectL = ones(size(ii)); % метка построения
-    color = 'rbmkrbmkrbmk'; % цвета линий
-
-    % Цикл назад во времени 
-    for t = tf:-1:0
-        % дерево первого сайта
-        subplot(2,1,1)
-        for i = 1:m 
-            % найти все пересечения > i
-            jj = find(G1(t+1,ii(i)) == G1(t+1,ii((i+1):m)));
-            if isempty(jj) && yesconnect1(i)
-                % если нет, построить горизонтальный сегмент
-                plot([t t+1], [i i], color(i)); 
-                hold on 
-            elseif yesconnect1(i)
-                % построить наклонный сегмент вверх
-                plot([t t+1], [max(jj)+i, i], color(i)); 
-                hold on 
-                % и больше не строить его
-                yesconnect1(i) = 0;  
-            end 
-        end % по линиям
-        
-        % дерево последнего сайта
-        subplot(2,1,2)
-        for i = 1:m 
-            % найти все пересечения > i
-            jj = find(GL(t+1,ii(i)) == GL(t+1,ii((i+1):m)));
-            if isempty(jj) && yesconnectL(i)
-                % если нет, построить горизонтальный сегмент
-                plot([t t+1], [i i], color(i)); 
-                hold on 
-            elseif yesconnectL(i)
-                % построить наклонный сегмент вверх
-                plot([t t+1], [max(jj)+i, i], color(i)); 
-                hold on 
-                % и больше не строить его
-                yesconnectL(i) = 0;  
-            end 
-        end % по линиям
-    end  % по времени
-
-    subplot(2,1,1)
-    hold off
-    ylabel('Дерево, локус 1')
-    xlabel('Время')
-    title(ts)
-    axis([0 tf+1 0.5 m+0.5])
-    subplot(2,1,2)
-    hold off
-    ylabel('Дерево, локус L')
-    xlabel('Время')
-    title(ts)
-    axis([0 tf+1 0.5 m+0.5])
-    
-    %% Сохранение Figure 3
-    filename3 = sprintf('graphics/%s_fig3_run%d_N%d_L%d_s0%.3f_r%.3f', ...
-        exp_name, run, N, L, s0, r);
-    saveas(gcf, [filename3, '.png']);
-    
-end % yesgenealogy?
-
-% Дополнительный график: эволюция средней приспособленности и скорости
-figure(4)
-subplot(2,1,1)
-plot(T, meanW)
-xlabel('Время, t')
-ylabel('Средняя приспособленность')
-title(sprintf('Эволюция средней приспособленности\n%s', ts))
-grid on
-
-subplot(2,1,2)
-plot(T, V_num_vec)
-xlabel('Время, t')
-ylabel('Численная скорость адаптации, V_num')
-title(sprintf('Динамика численной скорости адаптации\nV_num_{средн}=%.3e, V_an=%.3e', V_num, V_an))
-grid on
-
-%% Сохранение Figure 4
-filename4 = sprintf('graphics/%s_fig4_run%d_N%d_L%d_s0%.3f_r%.3f', ...
-    exp_name, run, N, L, s0, r);
-saveas(gcf, [filename4, '.png']);
-
-fprintf('Графики сохранены в папку graphics с префиксом: %s\n', exp_name);
+% Возвращаем пустые значения для совместимости
+TMRCA = [];
+adapt = [];
 
 %% ФУНКЦИЯ ДЛЯ ВЫЧИСЛЕНИЯ АНАЛИТИЧЕСКОЙ СКОРОСТИ (V_an)
 function V = compute_analytical_velocity(N, s, L, f0, muL)

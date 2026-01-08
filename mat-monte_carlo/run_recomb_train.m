@@ -7,19 +7,19 @@ r = 0;      % Частота рекомбинации
 M = 3;      % Количество точек рекомбинации
 s0 = 0.1;   % Базовая сила отбора
 L = 300;    % Длина генома (количество локусов)
-N = 5000;   % Размер популяции
-tf = 300;   % Время моделирования
+N = 500;   % Размер популяции
+tf = 150;   % Время моделирования
 f0 = 0;     % Начальная частота благоприятных аллелей
 muL = 0.01; % Общая частота мутаций
 run = 1;    % номер запуска
 
-[TMRCA, adapt_data] = recomb_train(distribution_s, r, M, s0, L, N, tf, f0, muL, run, 'test');
+%[TMRCA, adapt_data] = recomb_train_fig1(distribution_s, r, M, s0, L, N, tf, f0, muL, run, 'test');
+%[TMRCA, adapt_data] = recomb_train(distribution_s, r, M, s0, L, N, tf, f0, muL, run, 'test');
+%[TMRCA, adapt_data] = recomb_train_original(distribution_s, r, M, s0, L, N, tf, f0, muL, run);
 
 
-%{
 % Создаем структуру для хранения результатов
 results = struct();
-
 
 %% Серия 1: Влияние размера популяции (N)
 disp('=== СЕРИЯ 1: Влияние размера популяции (N) ===');
@@ -393,4 +393,3 @@ function V = compute_analytical_velocity(N, s, L, f0, muL)
         V = 0;
     end
 end
-%}
