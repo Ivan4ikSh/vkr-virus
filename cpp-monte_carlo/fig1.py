@@ -368,7 +368,7 @@ def plot_figure1_all(data_dir, output_file=None):
         plt.savefig(output_file, dpi=300, bbox_inches='tight')
         print(f"Полная figure1 сохранена в: {output_file}")
     
-    plt.show()
+    #plt.show()
     
     # Выводим информацию о загруженных данных
     print("\nСтатус загрузки данных:")
@@ -384,10 +384,8 @@ def main():
         epilog="""Пример использования:
   python fig1.py --dir results/experiment1 --output plots/figure1.png""")
     
-    parser.add_argument('--dir', type=str, required=True, 
-                       help='Директория с результатами симуляции')
-    parser.add_argument('--output', type=str, default=None, 
-                       help='Имя файла для сохранения графика (например, figure1.png)')
+    parser.add_argument('--dir', type=str, required=True, help='Директория с результатами симуляции')
+    parser.add_argument('--output', type=str, default=None, help='Имя файла для сохранения графика (например, figure1.png)')
     
     args = parser.parse_args()
     

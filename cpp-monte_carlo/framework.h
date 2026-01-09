@@ -1,7 +1,6 @@
 ﻿#pragma once
-//uint32_t SEED = RANDOM::Hash();
-//RandomGenerator RNG(SEED);
-RandomGenerator RNG(1);
+uint32_t SEED = RANDOM::Hash();
+RandomGenerator RNG(SEED);
 
 void InitDirectory(const StartParams& params) {
     FILEUTILS::CreateDirectory(params.output_dir);
@@ -54,32 +53,100 @@ void ComputeNumericalVelocity(const StartParams& params, SimulationParams& sim_p
     sim_params.V_num = (count > 0) ? sum / count : 0.0;
 }
 
-// Функция для вычисления аналитической скорости адаптации
-double ComputeAnalyticalVelocity(const StartParams& params) {
-    double Ub = params.muL * (1.0 - params.f0);
-    // Вычисление первого аргумента: Nsqrt(sUb)
-    double N_sqrt_sUb = static_cast<double>(params.N) * sqrt(params.s0 * Ub);
-    double log_N_sqrt_sUb = log(N_sqrt_sUb);
-    // Второй логарифмический член в знаменателе
-    double s_Ub_ratio = params.s0 / Ub;
-    double arg_log2 = s_Ub_ratio * log_N_sqrt_sUb;
-    double log_arg_log2 = log(arg_log2);
-    // Вычисление скорости по формуле
-    double numerator = 2.0 * params.s0 * log_N_sqrt_sUb;
-    double denominator = log_arg_log2 * log_arg_log2;
-    double V = numerator / denominator;
+// Правая часть уравнения (51)
+double RightSide51(double V, double s, double Ub) {
+    double log_term = log(V / (exp(1.0) * Ub));
+    double term1 = V / (2.0 * s) * (log_term * log_term + 1.0);
+    double term2 = 0.5 * log((s * s * s * Ub) / (V * V * log(V / Ub)));
+    return term1 - term2;
+}
 
-    // В конце ComputeAnalyticalVelocity
-    if (log_arg_log2 < 3.0 || log_N_sqrt_sUb < 3.0) {
-        cout << "WARNING! Velocity may be computed with error\n";
-        cout << "  Required: log(arg_log2) >= 3\n";
-        cout << "  Actual:   log(arg_log2) = " << log_arg_log2 << "\n";
-        cout << "  Required: log(N_sqrt_sUb) >= 3\n";
-        cout << "  Actual:   log(N_sqrt_sUb) = " << log_N_sqrt_sUb << "\n";
-        cout << "  s/Ub = " << s_Ub_ratio << " (should be >> 1)\n";
+// Правая часть уравнения (52)
+double RightSide52(double V, double s, double Ub) {
+    double log_term = log(V / (exp(1.0) * Ub));
+    double term1 = V / (2.0 * s) * (log_term * log_term + 1.0);
+    double term2 = 0.5 * log((s * s * Ub) / (V * log(V / Ub)));
+    return term1 - term2;
+}
+
+// Метод бисекции для решения уравнения f(V) = target
+double Bisection(double V_low, double V_high, double target, double (*func)(double, double, double), double s, double Ub, double tol = 1e-8, int max_iter = 1000) {
+    double f_low = func(V_low, s, Ub) - target;
+    double f_high = func(V_high, s, Ub) - target;
+
+    // Проверка, что функция меняет знак на отрезке
+    if (f_low * f_high > 0) {
+        // Если оба значения положительны, возможно, V_low слишком велико
+        if (f_low > 0 && f_high > 0) return V_low;
+        // Если оба отрицательны, V_high слишком мало
+        return V_high;
     }
 
-    return V;
+    for (int iter = 0; iter < max_iter; ++iter) {
+        double V_mid = (V_low + V_high) / 2.0;
+        if (V_high - V_low < tol) return V_mid;
+        double f_mid = func(V_mid, s, Ub) - target;
+        
+        if (f_mid == 0.0) return V_mid;
+        else if (f_low * f_mid < 0) {
+            V_high = V_mid;
+            f_high = f_mid;
+        }
+        else {
+            V_low = V_mid;
+            f_low = f_mid;
+        }
+    }
+
+    return (V_low + V_high) / 2.0;
+}
+
+double ComputeAnalyticalVelocity(const StartParams& params) {
+    double Ub = params.muL * (1.0 - params.f0);
+    double s = params.s0;
+    double N = static_cast<double>(params.N);
+    double target = log(N);
+
+    // Проверка применимости теории
+    if (Ub <= 0 || s <= 0) {
+        cerr << "ERROR: Ub or s must be positive" << endl;
+        return 0.0;
+    }
+    // Определяем границы поиска V
+    double V_min = Ub * 1.001;  // V должно быть > Ub для положительного логарифма
+    double V_max = 1000.0 * s;  // Начальная верхняя граница
+    // Увеличиваем V_max до тех пор, пока правая часть (51) не станет больше target
+    while (RightSide51(V_max, s, Ub) < target && V_max < 1e20) {
+        V_max *= 2.0;
+    }
+
+    if (V_max >= 1e20) {
+        cerr << "ERROR: Cannot find suitable V_max, N might be too large" << endl;
+        return 0.0;
+    }
+    // Решаем уравнение (51)
+    double V1 = Bisection(V_min, V_max, target, RightSide51, s, Ub);
+    // Проверяем условие длинного хвоста
+    if (V1 * log(V1 / Ub) < s) {
+        cout << "WARNING: Condition V*ln(V/Ub) >> s might not be satisfied." << endl;
+        cout << "  V*ln(V/Ub) = " << V1 * log(V1 / Ub) << ", s = " << s << endl;
+    }
+
+    // Если V1 > s, используем результат (51) для широкого распределения
+    if (V1 > s) return V1;
+    // Иначе решаем уравнение (52) для узкого распределения
+    else {
+        // Решаем уравнение (52)
+        double V2 = Bisection(V_min, V_max, target, RightSide52, s, Ub);
+        // Проверяем условие для формулы (52)
+        if (V2 < s && V2 > s / log(V2 / Ub)) return V2;
+        else {
+            // Если условия не выполняются, используем V1 с предупреждением
+            cout << "WARNING: Conditions for formula (52) not satisfied." << endl;
+            cout << "  Using V from formula (51): V = " << V1 << endl;
+            return V1;
+        }
+    }
 }
 
 vector<double> InitAdaptiveLandscape(const StartParams& params) {

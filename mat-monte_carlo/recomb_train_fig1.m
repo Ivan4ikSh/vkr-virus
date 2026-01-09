@@ -317,51 +317,128 @@ TMRCA = [];
 adapt = [];
 
 %% ФУНКЦИЯ ДЛЯ ВЫЧИСЛЕНИЯ АНАЛИТИЧЕСКОЙ СКОРОСТИ (V_an)
-function V = compute_analytical_velocity(N, s, L, f0, muL)
-    % Вычисление аналитической скорости адаптации по формуле
-    % V ≈ 2𝑠 log(𝑁√(𝑠𝑈𝑏)) / [log(𝑠/𝑈𝑏 * log(𝑁√(𝑠𝑈𝑏)))]^2
-    
+function V_an = compute_analytical_velocity(N, s, L, f0, muL)
     % Частота полезных мутаций на геном
     Ub = muL * (1 - f0);
     
-    % Проверка на возможность вычисления
+    % Проверка применимости теории
     if Ub <= 0 || s <= 0
-        V = 0;
+        fprintf('ERROR: Ub or s must be positive\n');
+        V_an = 0.0;
         return;
     end
     
-    % Вычисление компонентов формулы
-    N_sqrt_sUb = N * sqrt(s * Ub);
+    target = log(N);
     
-    % Проверка корректности аргументов логарифмов
-    if N_sqrt_sUb <= 1
-        V = 0;
+    % Определяем границы поиска V
+    V_min = Ub * 1.001;  % V должно быть > Ub для положительного логарифма
+    V_max = 1000.0 * s;  % Начальная верхняя граница
+    
+    % Увеличиваем V_max до тех пор, пока правая часть (51) не станет больше target
+    max_iter_expand = 100;
+    iter = 0;
+    while iter < max_iter_expand && right_side_51(V_max, s, Ub) < target && V_max < 1e20
+        V_max = V_max * 2.0;
+        iter = iter + 1;
+    end
+    
+    if V_max >= 1e20
+        fprintf('ERROR: Cannot find suitable V_max, N might be too large\n');
+        V_an = 0.0;
         return;
     end
     
-    log_N_sqrt_sUb = log(N_sqrt_sUb);
+    % Решаем уравнение (51)
+    V1 = bisection(V_min, V_max, target, @right_side_51, s, Ub);
     
-    % Второй логарифмический член в знаменателе
-    s_Ub_ratio = s / Ub;
-    arg_log2 = s_Ub_ratio * log_N_sqrt_sUb;
+    % Проверяем условие длинного хвоста
+    if V1 * log(V1 / Ub) < s
+        fprintf('WARNING: Condition V*ln(V/Ub) >> s might not be satisfied.\n');
+        fprintf('  V*ln(V/Ub) = %.4f, s = %.4f\n', V1 * log(V1 / Ub), s);
+    end
     
-    if arg_log2 <= 1
-        V = 0;
+    % Если V1 > s, используем результат (51) для широкого распределения
+    if V1 > s
+        V_an = V1;
+    % Иначе решаем уравнение (52) для узкого распределения
+    else
+        % Решаем уравнение (52)
+        V2 = bisection(V_min, V_max, target, @right_side_52, s, Ub);
+        
+        % Проверяем условие для формулы (52)
+        if V2 < s && V2 > s / log(V2 / Ub)
+            V_an = V2;
+        else
+            % Если условия не выполняются, используем V1 с предупреждением
+            fprintf('WARNING: Conditions for formula (52) not satisfied.\n');
+            fprintf('  Using V from formula (51): V = %.4f\n', V1);
+            V_an = V1;
+        end
+    end
+end
+
+%% Вспомогательные функции
+% Правая часть уравнения (51)
+function value = right_side_51(V, s, Ub)
+    log_term = log(V / (exp(1.0) * Ub));
+    term1 = V / (2.0 * s) * (log_term * log_term + 1.0);
+    term2 = 0.5 * log((s * s * s * Ub) / (V * V * log(V / Ub)));
+    value = term1 - term2;
+end
+
+% Правая часть уравнения (52)
+function value = right_side_52(V, s, Ub)
+    log_term = log(V / (exp(1.0) * Ub));
+    term1 = V / (2.0 * s) * (log_term * log_term + 1.0);
+    term2 = 0.5 * log((s * s * Ub) / (V * log(V / Ub)));
+    value = term1 - term2;
+end
+
+% Метод бисекции для решения уравнения f(V) = target
+function V_mid = bisection(V_low, V_high, target, func, s, Ub, tol, max_iter)
+    % Установка значений по умолчанию для параметров
+    if nargin < 8
+        max_iter = 1000;
+    end
+    if nargin < 7
+        tol = 1e-8;
+    end
+    
+    f_low = func(V_low, s, Ub) - target;
+    f_high = func(V_high, s, Ub) - target;
+    
+    % Проверка, что функция меняет знак на отрезке
+    if f_low * f_high > 0
+        % Если оба значения положительны, возможно, V_low слишком велико
+        if f_low > 0 && f_high > 0
+            V_mid = V_low;
+            return;
+        end
+        % Если оба отрицательны, V_high слишком мало
+        V_mid = V_high;
         return;
     end
     
-    log_arg_log2 = log(arg_log2);
-    
-    % Вычисление скорости по формуле
-    numerator = 2 * s * log_N_sqrt_sUb;
-    denominator = log_arg_log2^2;
-    
-    V = numerator / denominator;
-    
-    % Дополнительная проверка на физичность
-    if V < 0 || V > s * L
-        V = 0;
+    for iter = 1:max_iter
+        V_mid = (V_low + V_high) / 2.0;
+        if V_high - V_low < tol
+            return;
+        end
+        
+        f_mid = func(V_mid, s, Ub) - target;
+        
+        if abs(f_mid) < tol
+            return;
+        elseif f_low * f_mid < 0
+            V_high = V_mid;
+            f_high = f_mid;
+        else
+            V_low = V_mid;
+            f_low = f_mid;
+        end
     end
+    
+    V_mid = (V_low + V_high) / 2.0;
 end
 
 end % конец функции recomb_train
