@@ -1,4 +1,8 @@
 ﻿#pragma once
+#include "domain.h"
+#include "random.h"
+#include "utils.h"
+
 uint32_t SEED = RANDOM::Hash();
 RandomGenerator RNG(SEED);
 
@@ -46,7 +50,7 @@ void ComputeNumericalVelocity(const StartParams& params, SimulationParams& sim_p
     for (double i = t_start; i < V_num_vec.size(); ++i) {
         if (!isnan(V_num_vec[i]) && !isinf(V_num_vec[i])) {
             sum += V_num_vec[i];
-            count++;
+            ++count;
         }
     }
 
@@ -73,7 +77,6 @@ double RightSide52(double V, double s, double Ub) {
 double Bisection(double V_low, double V_high, double target, double (*func)(double, double, double), double s, double Ub, double tol = 1e-8, int max_iter = 1000) {
     double f_low = func(V_low, s, Ub) - target;
     double f_high = func(V_high, s, Ub) - target;
-
     // Проверка, что функция меняет знак на отрезке
     if (f_low * f_high > 0) {
         // Если оба значения положительны, возможно, V_low слишком велико
@@ -109,7 +112,7 @@ double ComputeAnalyticalVelocity(const StartParams& params) {
 
     // Проверка применимости теории
     if (Ub <= 0 || s <= 0) {
-        cerr << "ERROR: Ub or s must be positive" << endl;
+        cerr << "ERROR: Ub or s must be positive\n";
         return 0.0;
     }
     // Определяем границы поиска V
@@ -121,15 +124,15 @@ double ComputeAnalyticalVelocity(const StartParams& params) {
     }
 
     if (V_max >= 1e20) {
-        cerr << "ERROR: Cannot find suitable V_max, N might be too large" << endl;
+        cerr << "ERROR: Cannot find suitable V_max, N might be too large\n";
         return 0.0;
     }
     // Решаем уравнение (51)
     double V1 = Bisection(V_min, V_max, target, RightSide51, s, Ub);
     // Проверяем условие длинного хвоста
     if (V1 * log(V1 / Ub) < s) {
-        cout << "WARNING: Condition V*ln(V/Ub) >> s might not be satisfied." << endl;
-        cout << "  V*ln(V/Ub) = " << V1 * log(V1 / Ub) << ", s = " << s << endl;
+        cout << "WARNING: Condition V*ln(V/Ub) >> s might not be satisfied.\n";
+        cout << "  V*ln(V/Ub) = " << V1 * log(V1 / Ub) << ", s = " << s << "\n";
     }
 
     // Если V1 > s, используем результат (51) для широкого распределения
@@ -142,29 +145,29 @@ double ComputeAnalyticalVelocity(const StartParams& params) {
         if (V2 < s && V2 > s / log(V2 / Ub)) return V2;
         else {
             // Если условия не выполняются, используем V1 с предупреждением
-            cout << "WARNING: Conditions for formula (52) not satisfied." << endl;
-            cout << "  Using V from formula (51): V = " << V1 << endl;
+            cout << "WARNING: Conditions for formula (52) not satisfied.\n";
+            cout << "  Using V from formula (51): V = " << V1 << "\n";
             return V1;
         }
     }
 }
 
 vector<double> InitAdaptiveLandscape(const StartParams& params) {
-    vector<double> s(params.L);
+    vector<double> s;
     switch (params.distribution)
     {
     case DistributionType::CONSTANT:
     {
         // Постоянный коэффициент отбора для всех локусов
         for (int i = 0; i < params.L; ++i)
-            s[i] = params.s0;
+            s.push_back(params.s0);
     }
     break;
     case DistributionType::EXPONENTIAL:
     {
         // Экспоненциальное распределение : s = -s0 * ln(rand)
         for (int i = 0; i < params.L; ++i)
-            s[i] = -params.s0 * log(RNG.Random());
+            s.push_back(-params.s0 * log(RNG.Random()));
     }
     break;
     case DistributionType::HALF_GAUSSIAN:
@@ -173,7 +176,7 @@ vector<double> InitAdaptiveLandscape(const StartParams& params) {
         // Для получения среднего s0 нужно умножить на sqrt(pi/2)
         double factor = params.s0 * sqrt(CONST::PI / 2.0);
         for (int i = 0; i < params.L; ++i)
-            s[i] = factor * fabs(RNG.Normal(0.0, 1.0));
+            s.push_back(factor * fabs(RNG.Normal(0.0, 1.0)));
     }
     break;
     default:
@@ -183,15 +186,20 @@ vector<double> InitAdaptiveLandscape(const StartParams& params) {
     return s;
 }
 
-vector<double> ComputeFitness(const StartParams& params, SimulationParams& sim_params) {
-    vector<double> w(params.N);
+vector<double> ComputeFitness(const StartParams& params, const SimulationParams& sim_params) {
+    int N = params.N;
+    int L = params.L;
+    auto K = sim_params.K;
+    auto s = sim_params.s;
+    vector<double> w;
   
-    for (int i = 0; i < params.N; ++i) {
+    for (int i = 0; i < N; ++i) {
         double fitness = 0.0;
-        for (int j = 0; j < params.L; ++j) {
-            fitness += sim_params.K[i][j] * sim_params.s[j];
+
+        for (int j = 0; j < L; ++j) {
+            fitness += K[i][j] * s[j];
         }
-        w[i] = fitness;
+        w.push_back(fitness);
     }
     return w;
 }
@@ -255,11 +263,9 @@ pair<vector<double>, vector<double>> ComputeHistogram(const vector<double>& data
     return { xx, nn };
 }
 
-
 void Mutation(const StartParams& params, SimulationParams& simulation_params) {
     if (simulation_params.mu <= 0) return;
 
-    int total_mutations = 0;
     for (int i = 0; i < params.N; ++i) {
         for (int j = 0; j < params.L; ++j) {
             if (RNG.Random() < simulation_params.mu) 

@@ -68,7 +68,7 @@ namespace FILEUTILS {
         ofstream file(dir);
         if (!file.is_open()) return;
 
-        file << "time,bin_center,count" << endl;
+        file << "time,bin_center,count\n";
         file << scientific << setprecision(6);
 
         for (size_t hist_idx = 0; hist_idx < sim_params.hist_times.size(); ++hist_idx) {
@@ -77,7 +77,7 @@ namespace FILEUTILS {
             const auto& nn = sim_params.fitness_hist_nn[hist_idx];
             for (size_t i = 0; i < xx.size(); ++i) {
                 // Нормализуем на s0, как в MATLAB
-                if (nn[i] > 0) file << t << "," << xx[i] / params.s0 << "," << nn[i] << endl;
+                if (nn[i] > 0) file << t << "," << xx[i] / params.s0 << "," << nn[i] << "\n";
             }
         }
         file.close();
@@ -201,7 +201,7 @@ namespace FILEUTILS {
         ofstream file(filename);
         if (!file.is_open()) return;
 
-        file << "time,bin_center,count" << endl;
+        file << "time,bin_center,count\n";
         file << fixed << setprecision(6);
 
         // Сохраняем гистограммы частот аллелей (без нормализации на s0, так как это частоты)
@@ -212,7 +212,7 @@ namespace FILEUTILS {
 
             for (size_t i = 0; i < xx.size(); ++i) {
                 if (nn[i] > 0) {
-                    file << t << "," << xx[i] << "," << nn[i] << endl;
+                    file << t << "," << xx[i] << "," << nn[i] << "\n";
                 }
             }
         }
@@ -251,6 +251,6 @@ namespace FILEUTILS {
             SaveSubplot3Data(dir + "/fig1_223.csv", params, sim_params);
             SaveSubplot4Data(dir + "/fig1_224.csv", params, sim_params);
         }
-        cout << "Data saved in directory: " << dir << endl;
+        cout << "Data saved in directory: " << dir << "\n";
     }
 }

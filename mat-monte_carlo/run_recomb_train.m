@@ -1,394 +1,224 @@
+clc;
+clear all;
+
 global yesgenealogy;
 yesgenealogy = 1;  % 1 - строить генеалогию, 0 - нет
 
-% Базовые параметры
-distribution_s = 'const';
-r = 0;      % Частота рекомбинации
-M = 3;      % Количество точек рекомбинации
-s0 = 0.1;   % Базовая сила отбора
-L = 100;    % Длина генома (количество локусов)
-N = 1000;   % Размер популяции
-tf = 150;   % Время моделирования
-f0 = 0;     % Начальная частота благоприятных аллелей
-muL = 0.1; % Общая частота мутаций
-run = 1;    % номер запуска
+% Количество прогонов для каждого набора параметров
+num_runs = 3;
 
-%[TMRCA, adapt_data] = recomb_train_fig1(distribution_s, r, M, s0, L, N, tf, f0, muL, run, 'test');
-%[TMRCA, adapt_data] = recomb_train(distribution_s, r, M, s0, L, N, tf, f0, muL, run, 'test');
-%[TMRCA, adapt_data] = recomb_train_original(distribution_s, r, M, s0, L, N, tf, f0, muL, run);
-
-% Создаем структуру для хранения результатов
-results = struct();
+% Базовые параметры (по умолчанию)
+base_params.distribution_s = 'const';
+base_params.r = 0;      % Частота рекомбинации
+base_params.M = 3;      % Количество точек рекомбинации
+base_params.s0 = 0.1;   % Базовая сила отбора
+base_params.L = 100;    % Длина генома
+base_params.N = 1000;   % Размер популяции
+base_params.tf = 150;   % Время моделирования
+base_params.f0 = 0.01;     % Начальная частота благоприятных аллелей
+base_params.muL = 0.01;  % Общая частота мутаций
 
 %% Серия 1: Влияние размера популяции (N)
+%{
 disp('=== СЕРИЯ 1: Влияние размера популяции (N) ===');
-N_values = [1000, 5000]; % Размеры популяции из НИР
+N_values = [1000, 2500, 5000];
+exp_params = base_params;
 
 for i = 1:length(N_values)
-    current_N = N_values(i);
-    [TMRCA, adapt_data] = recomb_train(distribution_s, r, M, s0, L, current_N, tf, f0, muL, run, sprintf('exp_N_%d', i));
-    
-    % Сохраняем результаты
-    results.N(i).N = current_N;
-    results.N(i).TMRCA = TMRCA;
-    results.N(i).adapt_data = adapt_data;
-    
-    % Извлекаем данные
-    if isstruct(adapt_data) && isfield(adapt_data, 'V_an')
-        results.N(i).V_an = adapt_data.V_an;
-    else
-        % Если структура не содержит V_an, вычисляем аналитическую скорость
-        results.N(i).V_an = compute_analytical_velocity(current_N, s0, L, f0, muL);
-    end
-    
-    % Извлекаем k_av
-    if isstruct(adapt_data) && isfield(adapt_data, 'k_av')
-        k_av_data = adapt_data.k_av;
-    elseif isstruct(adapt_data)
-        field_names = fieldnames(adapt_data);
-        for j = 1:length(field_names)
-            field_data = adapt_data.(field_names{j});
-            if isnumeric(field_data) && length(field_data) > 1
-                k_av_data = field_data;
-                break;
-            end
-        end
-    elseif isnumeric(adapt_data)
-        k_av_data = adapt_data;
-    else
-        k_av_data = [];
-    end
-    
-    % Сохраняем данные о k_av
-    if ~isempty(k_av_data)
-        results.N(i).k_av = k_av_data;
-        results.N(i).k_final = k_av_data(end);
-        results.N(i).f_final = k_av_data(end) / L;
-        
-        % Вычисляем численную скорость адаптации
-        if length(k_av_data) > 1
-            time_steps = 0:length(k_av_data)-1; % Время в поколениях
-            % Используем линейную регрессию на последней трети данных
-            t_start = round(2*length(time_steps)/3);
-            if length(time_steps(t_start:end)) > 2
-                p = polyfit(time_steps(t_start:end), k_av_data(t_start:end), 1);
-                results.N(i).V_num = p(1);
-            else
-                % Если мало точек, используем среднюю скорость
-                results.N(i).V_num = (k_av_data(end) - k_av_data(1)) / (time_steps(end) - time_steps(1));
-            end
-        else
-            results.N(i).V_num = NaN;
-        end
-    else
-        results.N(i).k_final = NaN;
-        results.N(i).f_final = NaN;
-        results.N(i).V_num = NaN;
-    end
-    
-    % Выводим результаты
-    fprintf('N = %d:\n', current_N);
-    fprintf('  TMRCA = %.2f\n', TMRCA);
-    fprintf('  Численная скорость адаптации V_num = %.4f\n', results.N(i).V_num);
-    fprintf('  Аналитическая скорость адаптации V_an = %.4f\n', results.N(i).V_an);
-    if ~isnan(results.N(i).k_final)
-        fprintf('  Финальное число благоприятных аллелей k_кон = %.2f\n', results.N(i).k_final);
-        fprintf('  Финальная частота благоприятных аллелей f_кон = %.4f\n\n', results.N(i).f_final);
-    end
+    exp_params.N = N_values(i);
+    results = run_multiple_experiments(exp_params, num_runs, sprintf('s1_N%d', exp_params.N));
+    save_results_to_file(results, sprintf('exp1_N_%d_results.txt', exp_params.N));
 end
 
 %% Серия 2: Влияние числа локусов (L)
 disp('=== СЕРИЯ 2: Влияние числа локусов (L) ===');
-L_values = [100, 200, 300]; % Число локусов из НИР
+L_values = [100, 200, 300];
+exp_params = base_params;
+exp_params.N = 1000;  % Фиксируем N для серии 2
 
 for i = 1:length(L_values)
-    current_L = L_values(i);
-    [TMRCA, adapt_data] = recomb_train(distribution_s, r, M, s0, current_L, N, tf, f0, muL, run, sprintf('exp_L_%d', i));
-    
-    % Сохраняем результаты
-    results.L(i).L = current_L;
-    results.L(i).TMRCA = TMRCA;
-    results.L(i).adapt_data = adapt_data;
-    
-    % Вычисляем аналитическую скорость
-    results.L(i).V_an = compute_analytical_velocity(N, s0, current_L, f0, muL);
-    
-    % Извлекаем k_av
-    if isstruct(adapt_data) && isfield(adapt_data, 'k_av')
-        k_av_data = adapt_data.k_av;
-    elseif isstruct(adapt_data)
-        field_names = fieldnames(adapt_data);
-        for j = 1:length(field_names)
-            field_data = adapt_data.(field_names{j});
-            if isnumeric(field_data) && length(field_data) > 1
-                k_av_data = field_data;
-                break;
-            end
-        end
-    elseif isnumeric(adapt_data)
-        k_av_data = adapt_data;
-    else
-        k_av_data = [];
-    end
-    
-    % Сохраняем данные о k_av
-    if ~isempty(k_av_data)
-        results.L(i).k_av = k_av_data;
-        results.L(i).k_final = k_av_data(end);
-        results.L(i).f_final = k_av_data(end) / current_L;
-        
-        % Вычисляем численную скорость адаптации
-        if length(k_av_data) > 1
-            time_steps = 0:length(k_av_data)-1;
-            t_start = round(2*length(time_steps)/3);
-            if length(time_steps(t_start:end)) > 2
-                p = polyfit(time_steps(t_start:end), k_av_data(t_start:end), 1);
-                results.L(i).V_num = p(1);
-            else
-                results.L(i).V_num = (k_av_data(end) - k_av_data(1)) / (time_steps(end) - time_steps(1));
-            end
-        else
-            results.L(i).V_num = NaN;
-        end
-    else
-        results.L(i).k_final = NaN;
-        results.L(i).f_final = NaN;
-        results.L(i).V_num = NaN;
-    end
-    
-    % Выводим результаты
-    fprintf('L = %d:\n', current_L);
-    fprintf('  TMRCA = %.2f\n', TMRCA);
-    fprintf('  Численная скорость адаптации V_num = %.4f\n', results.L(i).V_num);
-    fprintf('  Аналитическая скорость адаптации V_an = %.4f\n', results.L(i).V_an);
-    if ~isnan(results.L(i).k_final)
-        fprintf('  Финальное число благоприятных аллелей k_кон = %.2f\n', results.L(i).k_final);
-        fprintf('  Финальная частота благоприятных аллелей f_кон = %.4f\n\n', results.L(i).f_final);
-    end
+    exp_params.L = L_values(i);
+    results = run_multiple_experiments(exp_params, num_runs, sprintf('s2_L%d', exp_params.L));
+    save_results_to_file(results, sprintf('exp2_L_%d_results.txt', exp_params.L));
 end
-
-%% Серия 3: Влияние частоты мутаций (µ_L)
-disp('=== СЕРИЯ 3: Влияние частоты мутаций (µ_L) ===');
-muL_values = [0.05, 0.1, 0.2]; % Частоты мутаций из НИР
+%}
+%% Серия 3: Влияние частоты мутаций (muL)
+%{
+disp('=== СЕРИЯ 3: Влияние частоты мутаций (muL) ===');
+muL_values = [0.01, 0.05];
+exp_params = base_params;
+exp_params.N = 1000;  % Фиксируем N для серии 3
+exp_params.L = 100;   % Фиксируем L для серии 3
 
 for i = 1:length(muL_values)
-    current_muL = muL_values(i);
-    [TMRCA, adapt_data] = recomb_train(distribution_s, r, M, s0, L, N, tf, f0, current_muL, run, sprintf('exp_muL_%d', i));
-    
-    % Сохраняем результаты
-    results.muL(i).muL = current_muL;
-    results.muL(i).TMRCA = TMRCA;
-    results.muL(i).adapt_data = adapt_data;
-    
-    % Вычисляем аналитическую скорость
-    results.muL(i).V_an = compute_analytical_velocity(N, s0, L, f0, current_muL);
-    
-    % Извлекаем k_av
-    if isstruct(adapt_data) && isfield(adapt_data, 'k_av')
-        k_av_data = adapt_data.k_av;
-    elseif isstruct(adapt_data)
-        field_names = fieldnames(adapt_data);
-        for j = 1:length(field_names)
-            field_data = adapt_data.(field_names{j});
-            if isnumeric(field_data) && length(field_data) > 1
-                k_av_data = field_data;
-                break;
-            end
-        end
-    elseif isnumeric(adapt_data)
-        k_av_data = adapt_data;
-    else
-        k_av_data = [];
-    end
-    
-    % Сохраняем данные о k_av
-    if ~isempty(k_av_data)
-        results.muL(i).k_av = k_av_data;
-        results.muL(i).k_final = k_av_data(end);
-        results.muL(i).f_final = k_av_data(end) / L;
-        
-        % Вычисляем численную скорость адаптации
-        if length(k_av_data) > 1
-            time_steps = 0:length(k_av_data)-1;
-            t_start = round(2*length(time_steps)/3);
-            if length(time_steps(t_start:end)) > 2
-                p = polyfit(time_steps(t_start:end), k_av_data(t_start:end), 1);
-                results.muL(i).V_num = p(1);
-            else
-                results.muL(i).V_num = (k_av_data(end) - k_av_data(1)) / (time_steps(end) - time_steps(1));
-            end
-        else
-            results.muL(i).V_num = NaN;
-        end
-    else
-        results.muL(i).k_final = NaN;
-        results.muL(i).f_final = NaN;
-        results.muL(i).V_num = NaN;
-    end
-    
-    % Выводим результаты
-    fprintf('µ_L = %.2f:\n', current_muL);
-    fprintf('  TMRCA = %.2f\n', TMRCA);
-    fprintf('  Численная скорость адаптации V_num = %.4f\n', results.muL(i).V_num);
-    fprintf('  Аналитическая скорость адаптации V_an = %.4f\n', results.muL(i).V_an);
-    if ~isnan(results.muL(i).k_final)
-        fprintf('  Финальное число благоприятных аллелей k_кон = %.2f\n', results.muL(i).k_final);
-        fprintf('  Финальная частота благоприятных аллелей f_кон = %.4f\n\n', results.muL(i).f_final);
-    end
+    exp_params.muL = muL_values(i);
+    results = run_multiple_experiments(exp_params, num_runs, sprintf('s3_muL_%.2f', exp_params.muL));
+    save_results_to_file(results, sprintf('exp3_muL_%.2f_results.txt', exp_params.muL));
 end
-
+%}
 %% Серия 4: Влияние силы отбора (s0)
 disp('=== СЕРИЯ 4: Влияние силы отбора (s0) ===');
-s0_values = [0.05, 0.1, 0.2]; % Меньшая, базовая и большая сила отбора
+s0_values = [0.05, 0.1];
+exp_params = base_params;
 
 for i = 1:length(s0_values)
-    current_s0 = s0_values(i);
-    [TMRCA, adapt_data] = recomb_train(distribution_s, r, M, current_s0, L, N, tf, f0, muL, run, sprintf('exp_s0_%d', i));
+    exp_params.s0 = s0_values(i);
+    results = run_multiple_experiments(exp_params, num_runs, sprintf('s4_s0_%.2f', exp_params.s0));
+    save_results_to_file(results, sprintf('exp4_s0_%.2f_results.txt', exp_params.s0));
+end
+
+disp('=== ВСЕ ЭКСПЕРИМЕНТЫ ЗАВЕРШЕНЫ ===');
+%% Вспомогательные функции
+
+function results = run_multiple_experiments(params, num_runs, exp_tag)
+    % Запускает несколько прогонов эксперимента с одними и теми же параметрами
+    % и возвращает структуру с усредненными результатами
     
-    % Сохраняем результаты
-    results.s0(i).s0 = current_s0;
-    results.s0(i).TMRCA = TMRCA;
-    results.s0(i).adapt_data = adapt_data;
+    % Инициализация массивов для хранения результатов всех прогонов
+    TMRCA_array = cell(1, num_runs);  % Изменено на cell array для хранения векторов
+    V_num_array = zeros(1, num_runs);
+    V_an_array = zeros(1, num_runs);
+    k_final_array = zeros(1, num_runs);
+    f_final_array = zeros(1, num_runs);
     
-    % Вычисляем аналитическую скорость
-    results.s0(i).V_an = compute_analytical_velocity(N, current_s0, L, f0, muL);
+    fprintf('Эксперимент %s: запуск %d прогонов...\n', exp_tag, num_runs);
     
-    % Извлекаем k_av
-    if isstruct(adapt_data) && isfield(adapt_data, 'k_av')
-        k_av_data = adapt_data.k_av;
-    elseif isstruct(adapt_data)
-        field_names = fieldnames(adapt_data);
-        for j = 1:length(field_names)
-            field_data = adapt_data.(field_names{j});
-            if isnumeric(field_data) && length(field_data) > 1
-                k_av_data = field_data;
-                break;
+    for run_num = 1:num_runs
+        fprintf('  Прогон %d/%d...\n', run_num, num_runs);
+        % Уникальное имя для файла графика
+        run_name = sprintf('%s_run%d', exp_tag, run_num);
+        % Запуск модели
+        [TMRCA, adapt_data] = recomb_train(params.distribution_s, params.r, params.M, params.s0, params.L, params.N, params.tf, params.f0, params.muL, run_num, run_name);
+        % Сохраняем TMRCA (может быть вектором)
+        TMRCA_array{run_num} = TMRCA;
+        % Проверяем структуру adapt_data на наличие нужных полей
+        V_num = NaN;
+        V_an = NaN;
+        
+        if isstruct(adapt_data)
+            % Извлекаем k_av для расчёта k_кон и f_кон
+            if isfield(adapt_data, 'k_av')
+                k_av_data = adapt_data.k_av;
+                k_final_array(run_num) = k_av_data(end);
+                f_final_array(run_num) = k_av_data(end) / params.L;
+            else
+                % Если нет k_av, ищем числовое поле
+                for j = 1:length(field_names)
+                    field_data = adapt_data.(field_names{j});
+                    if isnumeric(field_data) && length(field_data) > 1
+                        k_av_data = field_data;
+                        k_final_array(run_num) = k_av_data(end);
+                        f_final_array(run_num) = k_av_data(end) / params.L;
+                        break;
+                    end
+                end
             end
+        elseif isnumeric(adapt_data)
+            % Если adapt_data - это массив (предположительно k_av)
+            k_av_data = adapt_data;
+            k_final_array(run_num) = k_av_data(end);
+            f_final_array(run_num) = k_av_data(end) / params.L;
+        else
+            k_final_array(run_num) = NaN;
+            f_final_array(run_num) = NaN;
         end
-    elseif isnumeric(adapt_data)
-        k_av_data = adapt_data;
-    else
-        k_av_data = [];
+        
+        % Сохраняем скорости
+        V_num_array(run_num) = V_num;
+        V_an_array(run_num) = V_an;
     end
     
-    % Сохраняем данные о k_av
-    if ~isempty(k_av_data)
-        results.s0(i).k_av = k_av_data;
-        results.s0(i).k_final = k_av_data(end);
-        results.s0(i).f_final = k_av_data(end) / L;
-        
-        % Вычисляем численную скорость адаптации
-        if length(k_av_data) > 1
-            time_steps = 0:length(k_av_data)-1;
-            t_start = round(2*length(time_steps)/3);
-            if length(time_steps(t_start:end)) > 2
-                p = polyfit(time_steps(t_start:end), k_av_data(t_start:end), 1);
-                results.s0(i).V_num = p(1);
+    % Рассчитываем средние значения и стандартные отклонения
+    results = struct();
+    
+    % Параметры эксперимента
+    results.params = params;
+    results.exp_tag = exp_tag;
+    results.num_runs = num_runs;
+    
+    % Данные по прогонам
+    results.TMRCA_runs = TMRCA_array;  % Сохраняем как cell array
+    results.V_num_runs = V_num_array;
+    results.V_an_runs = V_an_array;
+    results.k_final_runs = k_final_array;
+    results.f_final_runs = f_final_array;
+    
+    % Для TMRCA вычисляем среднее по всем элементам всех векторов
+    all_TMRCA_values = [];
+    for i = 1:num_runs
+        if isnumeric(TMRCA_array{i})
+            all_TMRCA_values = [all_TMRCA_values; TMRCA_array{i}(:)];
+        end
+    end
+    
+    if ~isempty(all_TMRCA_values)
+        results.TMRCA_mean = mean(all_TMRCA_values, 'omitnan');
+        results.TMRCA_std = std(all_TMRCA_values, 'omitnan');
+    else
+        results.TMRCA_mean = NaN;
+        results.TMRCA_std = NaN;
+    end
+    
+    % Средние значения и стандартные отклонения для остальных параметров
+    results.V_num_mean = mean(V_num_array, 'omitnan');
+    results.V_an_mean = mean(V_an_array, 'omitnan');
+    results.k_final_mean = mean(k_final_array, 'omitnan');
+    results.f_final_mean = mean(f_final_array, 'omitnan');
+    
+    results.V_num_std = std(V_num_array, 'omitnan');
+    results.V_an_std = std(V_an_array, 'omitnan');
+    results.k_final_std = std(k_final_array, 'omitnan');
+    results.f_final_std = std(f_final_array, 'omitnan');
+end
+
+function save_results_to_file(results, filename)
+    % Сохраняет результаты эксперимента в текстовый файл
+    
+    fid = fopen(filename, 'w', 'n', 'UTF-8');
+    % Заголовок
+    fprintf(fid, 'ЭКСПЕРИМЕНТ: %s\n', results.exp_tag);    
+    % Параметры эксперимента
+    fprintf(fid, 'ПАРАМЕТРЫ:\n');
+    fprintf(fid, 'distribution_s = %s\n', results.params.distribution_s);
+    fprintf(fid, 'r = %.2f\n', results.params.r);
+    fprintf(fid, 'M = %d\n', results.params.M);
+    fprintf(fid, 's0 = %.3f\n', results.params.s0);
+    fprintf(fid, 'L = %d\n', results.params.L);
+    fprintf(fid, 'N = %d\n', results.params.N);
+    fprintf(fid, 'tf = %d\n', results.params.tf);
+    fprintf(fid, 'f0 = %.3f\n', results.params.f0);
+    fprintf(fid, 'muL = %.3f\n', results.params.muL);
+    fprintf(fid, '\n');
+    
+    % Результаты по прогонам
+    fprintf(fid, 'РЕЗУЛЬТАТЫ ПО ПРОГОНАМ:\n');
+    fprintf(fid, '----------------------\n');
+    fprintf(fid, '%-6s %-15s %-12s %-12s\n', 'Прогон', 'TMRCA', 'k_кон', 'f_кон');
+    fprintf(fid, '%-6s %-15s %-12s %-12s\n', '------', '---------------', '------------', '------------');
+    
+    for i = 1:results.num_runs
+        % Форматируем TMRCA для вывода
+        if isnumeric(results.TMRCA_runs{i})
+            if length(results.TMRCA_runs{i}) == 1
+                tmrca_str = sprintf('%.2f', results.TMRCA_runs{i});
             else
-                results.s0(i).V_num = (k_av_data(end) - k_av_data(1)) / (time_steps(end) - time_steps(1));
+                tmrca_str = sprintf('[%dx1]', length(results.TMRCA_runs{i}));
             end
         else
-            results.s0(i).V_num = NaN;
+            tmrca_str = 'N/A';
         end
-    else
-        results.s0(i).k_final = NaN;
-        results.s0(i).f_final = NaN;
-        results.s0(i).V_num = NaN;
+        
+        fprintf(fid, '%-6d %-15s %-12.4f %-12.6f\n', i, tmrca_str, results.k_final_runs(i), results.f_final_runs(i));
     end
+    fprintf(fid, '\n');
     
-    % Выводим результаты
-    fprintf('s0 = %.2f:\n', current_s0);
-    fprintf('  TMRCA = %.2f\n', TMRCA);
-    fprintf('  Численная скорость адаптации V_num = %.4f\n', results.s0(i).V_num);
-    fprintf('  Аналитическая скорость адаптации V_an = %.4f\n', results.s0(i).V_an);
-    if ~isnan(results.s0(i).k_final)
-        fprintf('  Финальное число благоприятных аллелей k_кон = %.2f\n', results.s0(i).k_final);
-        fprintf('  Финальная частота благоприятных аллелей f_кон = %.4f\n\n', results.s0(i).f_final);
-    end
-end
-
-%% Сводная таблица результатов
-disp('=== СВОДНАЯ ТАБЛИЦА РЕЗУЛЬТАТОВ ===');
-fprintf('\nСерия 1: Влияние размера популяции (N)\n');
-fprintf('%-10s %-10s %-10s %-10s %-10s %-10s\n', 'N', 'TMRCA', 'V_num', 'V_an', 'k_кон', 'f_кон');
-for i = 1:length(N_values)
-    fprintf('%-10d %-10.2f %-10.4f %-10.4f %-10.2f %-10.4f\n', ...
-        results.N(i).N, results.N(i).TMRCA, results.N(i).V_num, results.N(i).V_an, ...
-        results.N(i).k_final, results.N(i).f_final);
-end
-
-fprintf('\nСерия 2: Влияние числа локусов (L)\n');
-fprintf('%-10s %-10s %-10s %-10s %-10s %-10s\n', 'L', 'TMRCA', 'V_num', 'V_an', 'k_кон', 'f_кон');
-for i = 1:length(L_values)
-    fprintf('%-10d %-10.2f %-10.4f %-10.4f %-10.2f %-10.4f\n', ...
-        results.L(i).L, results.L(i).TMRCA, results.L(i).V_num, results.L(i).V_an, ...
-        results.L(i).k_final, results.L(i).f_final);
-end
-
-fprintf('\nСерия 3: Влияние частоты мутаций (µ_L)\n');
-fprintf('%-10s %-10s %-10s %-10s %-10s %-10s\n', 'µ_L', 'TMRCA', 'V_num', 'V_an', 'k_кон', 'f_кон');
-for i = 1:length(muL_values)
-    fprintf('%-10.2f %-10.2f %-10.4f %-10.4f %-10.2f %-10.4f\n', ...
-        results.muL(i).muL, results.muL(i).TMRCA, results.muL(i).V_num, results.muL(i).V_an, ...
-        results.muL(i).k_final, results.muL(i).f_final);
-end
-
-fprintf('\nСерия 4: Влияние силы отбора (s0)\n');
-fprintf('%-10s %-10s %-10s %-10s %-10s %-10s\n', 's0', 'TMRCA', 'V_num', 'V_an', 'k_кон', 'f_кон');
-for i = 1:length(s0_values)
-    fprintf('%-10.2f %-10.2f %-10.4f %-10.4f %-10.2f %-10.4f\n', ...
-        results.s0(i).s0, results.s0(i).TMRCA, results.s0(i).V_num, results.s0(i).V_an, ...
-        results.s0(i).k_final, results.s0(i).f_final);
-end
-
-% Сохранение результатов в файл
-save('experiment_results.mat', 'results');
-fprintf('\nРезультаты сохранены в файл experiment_results.mat\n');
-
-%% ФУНКЦИЯ ДЛЯ ВЫЧИСЛЕНИЯ АНАЛИТИЧЕСКОЙ СКОРОСТИ (V_an)
-function V = compute_analytical_velocity(N, s, L, f0, muL)
-    % Вычисление аналитической скорости адаптации по формуле
-    % V ≈ 2𝑠 log(𝑁√(𝑠𝑈𝑏)) / [log(𝑠/𝑈𝑏 * log(𝑁√(𝑠𝑈𝑏)))]^2
-    
-    % Частота полезных мутаций на геном
-    Ub = muL * (1 - f0);
-    
-    % Проверка на возможность вычисления
-    if Ub <= 0 || s <= 0
-        V = 0;
-        return;
-    end
-    
-    % Вычисление компонентов формулы
-    N_sqrt_sUb = N * sqrt(s * Ub);
-    
-    % Проверка корректности аргументов логарифмов
-    if N_sqrt_sUb <= 1
-        V = 0;
-        return;
-    end
-    
-    log_N_sqrt_sUb = log(N_sqrt_sUb);
-    
-    % Второй логарифмический член в знаменателе
-    s_Ub_ratio = s / Ub;
-    arg_log2 = s_Ub_ratio * log_N_sqrt_sUb;
-    
-    if arg_log2 <= 1
-        V = 0;
-        return;
-    end
-    
-    log_arg_log2 = log(arg_log2);
-    
-    % Вычисление скорости по формуле
-    numerator = 2 * s * log_N_sqrt_sUb;
-    denominator = log_arg_log2^2;
-    
-    V = numerator / denominator;
-    
-    % Дополнительная проверка на физичность
-    if V < 0 || V > s * L
-        V = 0;
-    end
+    % Статистические показатели
+    fprintf(fid, 'СТАТИСТИЧЕСКИЕ ПОКАЗАТЕЛИ (среднее ± стандартное отклонение):\n');
+    fprintf(fid, '------------------------------------------------------------\n');
+    fprintf(fid, 'TMRCA:                 %.2f ± %.2f поколений\n', results.TMRCA_mean, results.TMRCA_std);
+    fprintf(fid, 'Финальное k_кон:       %.4f ± %.4f\n', results.k_final_mean, results.k_final_std);
+    fprintf(fid, 'Финальное f_кон:       %.6f ± %.6f\n', results.f_final_mean, results.f_final_std);
+    fprintf(fid, '\n');
+   
+    fprintf('Результаты сохранены в файл: %s\n', filename);
 end

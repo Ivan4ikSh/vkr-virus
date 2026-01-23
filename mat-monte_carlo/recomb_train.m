@@ -17,7 +17,7 @@ global yesgenealogy
 
 %% Включаем подробный вывод для сравнения с C++
 debug_output = false;  % Включаем вывод отладочной информации
-debug_step = 1;       % Выводим каждый шаг
+debug_step = 0;       % Выводим каждый шаг
 
 %% Создание папки для графиков
 if ~exist('graphics', 'dir')
@@ -125,32 +125,6 @@ for t = T
     nprog = zeros(N,1);
     for i = 1:N
         nprog(i) = sum(X > b1(i) & X < b2(i)); % актуальное число потомков
-    end
-
-    if t <= 10  % Выводим только первые шаги
-        fprintf('DEBUG t=%d:\n', t);
-        fprintf('  w(1:5) = ');
-        fprintf('%.4f ', w(1:5)/s0);
-        fprintf('\n');
-    
-        fprintf('  nprogav = ');
-        fprintf('%.4f ', nprogav(1:5));
-        fprintf('\n');
-        % Выведем nprog для первых 5 особей
-        fprintf('  nprog(1:5) = ');
-        fprintf('%d ', nprog(1:5));
-        fprintf('\n');
-    
-        % Выведем b1, b2 для первых 5 особей
-        fprintf('  b1(1:5) = ');
-        fprintf('%.2f ', b1(1:5));
-        fprintf('\n');
-        fprintf('  b2(1:5) = ');
-        fprintf('%.2f ', b2(1:5));
-        fprintf('\n');
-    
-        % Проверим сумму nprog
-        fprintf('  sum(nprog) = %d\n', sum(nprog));
     end
   
     %% Обновление популяции

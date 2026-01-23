@@ -2,12 +2,13 @@
 #include "random.h"
 #include "utils.h"
 #include "framework.h"
+#include "luksza.h"
 
 class MonteCarlo {
 public:
-    MonteCarlo(const StartParams& start_params) : start_params_(start_params) {
+    MonteCarlo(const StartParams& start_params, LukszaParams luksza_params) : start_params_(start_params), luksza_params_(luksza_params), luksza_(start_params, luksza_params) {
         InitDirectory(start_params);
-        InitStartParams(); 
+        InitStartParams();
     }
 
     void RunSimulation() {
@@ -15,10 +16,12 @@ public:
         int total = simulation_params_.T.size();
         int current = 0;
 
+        PrintDebugHeader();
         for (const int& t : simulation_params_.T) {
             SimulationStep(t);
             ++current;
-            PrintProgress(current, total);
+            PrintDebugStep(t);
+            //PrintProgress(current, total);
         }
         cout << "\n";
         ComputeNumericalVelocity(start_params_, simulation_params_);
@@ -28,37 +31,42 @@ public:
 private:
     StartParams start_params_;
     SimulationParams simulation_params_;
+    LukszaParams luksza_params_;
+    LukszaModel luksza_;
 
     void InitStartParams() {
         simulation_params_.mu = start_params_.muL / start_params_.L;
-        simulation_params_.T.resize(start_params_.tf + 1);
+        simulation_params_.T.resize(start_params_.tf);
         iota(simulation_params_.T.begin(), simulation_params_.T.end(), 0);
 
         simulation_params_.s = InitAdaptiveLandscape(start_params_);
         simulation_params_.V_an = ComputeAnalyticalVelocity(start_params_);
 
         // Инициализация матрицы предков A: (1:N)'*ones(1,L)
-        simulation_params_.A.resize(start_params_.N, vector<int>(start_params_.L));
-        for (int i = 0; i < start_params_.N; ++i)
+        for (int i = 0; i < start_params_.N; ++i) {
+            vector<int> loci;
             for (int j = 0; j < start_params_.L; ++j)
-                simulation_params_.A[i][j] = i + 1;  // +1 для соответствия MATLAB (индексация с 1)
+                loci.push_back(i);
+
+            simulation_params_.A.push_back(loci);
+        }
 
         simulation_params_.t_int = round(start_params_.tf / 10.0);
-        simulation_params_.colors = "rgbmkrgbmkrgbmkrgbmk";
         simulation_params_.f_sample = 0.1;
 
         // Инициализация популяции K: (rand(N,L) < f0) или zeros(N,L)
-        simulation_params_.K.resize(start_params_.N, vector<int>(start_params_.L, 0));
-
         if (start_params_.f0 != 0.0) {
             for (int i = 0; i < start_params_.N; ++i) {
-                for (int j = 0; j < start_params_.L; ++j) {
-                    simulation_params_.K[i][j] = (RNG.Random() < start_params_.f0) ? 1 : 0;
-                }
+                vector<int> loci;
+                for (int j = 0; j < start_params_.L; ++j)
+                    loci.push_back((RNG.Random() < start_params_.f0) ? 1 : 0);
+
+                simulation_params_.K.push_back(loci);
             }
         }
+        else simulation_params_.K.resize(start_params_.N, vector<int>(start_params_.L, 0));
 
-        int time_steps = start_params_.tf + 1;
+        int time_steps = start_params_.tf;
 
         simulation_params_.W.resize(start_params_.N, vector<double>(time_steps, 0.0));
         simulation_params_.P1.resize(start_params_.N, vector<int>(time_steps, 0));
@@ -73,24 +81,27 @@ private:
         simulation_params_.mean_W.resize(time_steps, 0.0);
 
         // Инициализация дополнительных векторов
-        simulation_params_.dist_over_L.resize(start_params_.tf + 1, 0.0);
-        simulation_params_.f1_site.resize(start_params_.tf + 1, 0.0);
+        simulation_params_.dist_over_L.resize(start_params_.tf, 0.0);
+        simulation_params_.f1_site.resize(start_params_.tf, 0.0);
     }
 
     void SimulationStep(const int& t) {
+        const vector<vector<int>> K_prev = simulation_params_.K;
         // 1. Мутации
         Mutation(start_params_, simulation_params_);
         // 2. Начальные метки родителей: P = (1:N)'*ones(1,L)
         // Каждый локус имеет родителя - саму особь
-        simulation_params_.P.resize(start_params_.N, vector<int>(start_params_.L));
-        // Для каждого вектора в P заполняем его значениями от 1 до N
         for (int i = 0; i < start_params_.N; ++i) {
-            for (int j = 0; j < start_params_.L; ++j) {
-                simulation_params_.P[i][j] = i + 1; // +1 для соответствия MATLAB
-            }
+            vector<int> loci;
+            for (int j = 0; j < start_params_.L; ++j)
+                loci.push_back(i);
+
+            simulation_params_.P.push_back(loci);
         }
         // 3. Расчет приспособленностей: w = K * s'
-        vector<double> w = ComputeFitness(start_params_, simulation_params_);
+        vector<double> w;
+        if (CONST::USE_LUKSZA) w = luksza_.CalculateFitness(simulation_params_.K, simulation_params_.A, K_prev);
+        else w = ComputeFitness(start_params_, simulation_params_);
         // 4. Расчет среднего числа потомков: nprogav = exp(w) / mean(exp(w))
         vector<double> n_prog_av = ComputeDescNumAv(start_params_, simulation_params_, w);
         // 5. Метод "сломанной палки": расчет кумулятивных сумм
@@ -101,7 +112,6 @@ private:
         if (start_params_.r > 0) Recombination();
         // 8. Запись наблюдаемых величин
         RecordObservables(t, w);
-
         if (simulation_params_.t_int * round(t / simulation_params_.t_int) == t) {
             auto hist = ComputeHistogram(w);
             simulation_params_.fitness_hist_xx.push_back(hist.first);
@@ -126,7 +136,8 @@ private:
     }
 
     vector<int> BrokenStick(const vector<double>& n_prog_av) {
-        // Кумулятивные суммы для "сломанной палки"
+        const int BUCKETS = min(1000, start_params_.N); // Можно подобрать оптимальное значение
+
         vector<double> b2(start_params_.N);
         partial_sum(n_prog_av.begin(), n_prog_av.end(), b2.begin());
 
@@ -134,16 +145,49 @@ private:
         b1[0] = 0.0;
         for (int i = 1; i < start_params_.N; ++i) b1[i] = b2[i - 1];
 
-        // Фактическое число потомков
-        vector<int> n_prog(start_params_.N, 0);
-        vector<double> X(start_params_.N);
-        for (int i = 0; i < start_params_.N; ++i) X[i] = RNG.Random() * start_params_.N;
-
+        // Создаем гистограмму (корзины)
+        vector<int> histogram(BUCKETS, 0);
         for (int i = 0; i < start_params_.N; ++i) {
-            for (int k = 0; k < start_params_.N; ++k) {
-                if (X[k] > b1[i] && X[k] < b2[i]) {
-                    n_prog[i]++;
+            double x = RNG.Random() * start_params_.N;
+            int bucket = static_cast<int>(x * BUCKETS / start_params_.N);
+            ++histogram[bucket];
+        }
+
+        // Распределяем по интервалам через гистограмму
+        vector<int> n_prog(start_params_.N, 0);
+        for (int i = 0; i < start_params_.N; ++i) {
+            // Находим какие корзины попадают в интервал [b1[i], b2[i])
+            int start_bucket = static_cast<int>(b1[i] * BUCKETS / start_params_.N);
+            int end_bucket = static_cast<int>(b2[i] * BUCKETS / start_params_.N);
+
+            // Распределяем содержимое корзин пропорционально
+            for (int bucket = start_bucket; bucket <= end_bucket; ++bucket) {
+                if (bucket < 0 || bucket >= BUCKETS) continue;
+
+                // Вычисляем какую часть корзины занимает наш интервал
+                double bucket_start = static_cast<double>(bucket) * start_params_.N / BUCKETS;
+                double bucket_end = static_cast<double>(bucket + 1) * start_params_.N / BUCKETS;
+
+                double overlap_start = max(b1[i], bucket_start);
+                double overlap_end = min(b2[i], bucket_end);
+
+                if (overlap_end > overlap_start) {
+                    double overlap_ratio = (overlap_end - overlap_start) / (bucket_end - bucket_start);
+                    n_prog[i] += static_cast<int>(histogram[bucket] * overlap_ratio + 0.5);
                 }
+            }
+        }
+
+        // Корректировка (добавляем недостающие/убираем лишние)
+        int total_assigned = accumulate(n_prog.begin(), n_prog.end(), 0);
+        int remaining = start_params_.N - total_assigned;
+
+        if (remaining != 0) {
+            // Простое распределение остатка
+            for (int i = 0; i < abs(remaining); ++i) {
+                int idx = RNG.RandomInt(0, start_params_.N - 1);
+                if (remaining > 0) ++n_prog[idx];
+                else if (n_prog[idx] > 0) --n_prog[idx];
             }
         }
 
@@ -240,8 +284,8 @@ private:
     void RecordObservables(const int& t, const vector<double>& w) {
         // 1. Частоты аллелей в каждом локусе
         for (int locus = 0; locus < start_params_.L; ++locus) {
-            double allele_sum = std::accumulate(simulation_params_.K.begin(), simulation_params_.K.end(), 0.0,
-                [locus](double sum, const std::vector<int>& genome) { return sum + genome[locus]; });
+            double allele_sum = accumulate(simulation_params_.K.begin(), simulation_params_.K.end(), 0.0,
+                [locus](double sum, const vector<int>& genome) { return sum + genome[locus]; });
             simulation_params_.f_site[t][locus] = allele_sum / static_cast<double>(start_params_.N);
         }
         // 2. Среднее число благоприятных аллелей на геном
@@ -319,10 +363,8 @@ private:
             if (variance < 1e-12) ++common_all;
         }
         simulation_params_.C_all[t] = common_all / start_params_.L;
-
         // 7. Средняя приспособленность
         simulation_params_.mean_W[t] = mean_w;
-
         // Вычисляем dist (генетическое разнообразие)
         double dist_sum = 0.0;
         for (int locus = 0; locus < start_params_.L; ++locus) {
@@ -376,7 +418,7 @@ private:
             << setw(10) << "min_f"
             << setw(10) << "max_f"
             << setw(10) << "mean_f"
-            << endl;
+            << "\n";
         cout << "--------------------------------------------------------------------------------\n";
     }
 
@@ -394,10 +436,10 @@ private:
         }
         mean_freq /= start_params_.L;
 
-        double sumK = 0;
+        double sum_K = 0;
         for (int i = 0; i < start_params_.N; ++i) {
             for (int j = 0; j < start_params_.L; ++j) {
-                sumK += simulation_params_.K[i][j];
+                sum_K += simulation_params_.K[i][j];
             }
         }
 
@@ -409,10 +451,10 @@ private:
             << setw(12) << fixed << setprecision(4) << simulation_params_.f_survive[t]
             << setw(8) << fixed << setprecision(4) << simulation_params_.C[t]
             << setw(8) << fixed << setprecision(4) << simulation_params_.C_all[t]
-            << setw(10) << fixed << setprecision(0) << sumK
+            << setw(10) << fixed << setprecision(0) << sum_K
             << setw(10) << fixed << setprecision(4) << min_freq
             << setw(10) << fixed << setprecision(4) << max_freq
             << setw(10) << fixed << setprecision(4) << mean_freq
-            << endl;
+            << "\n";
     }
 };

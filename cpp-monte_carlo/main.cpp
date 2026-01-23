@@ -8,62 +8,37 @@ int main() {
     {
         // Основной эксперимент с постоянным распределением отбора
         cout << "=========================================\n";
+        // Флаг на использование Модели Лукши (по умолчанию false)
+        CONST::USE_LUKSZA = false;
+        // Параметры модели Монте-Карло
         StartParams params;
-        params.exp_name = "test1";
-        params.N = 1000;
-        params.L = 100;
-        params.s0 = 0.05;
-        params.r = 0;
-        params.f0 = 0;
-        params.muL = 0.1;
-        params.tf = 150;
-        params.M = 3;
+        params.exp_name = "test";
+        params.N = 1000;      // Размер популяции (можно увеличить до 10^4 для лучшей статистики)
+        params.L = 100;       // Более реалистичная длина для HA белка (бинарное представление)
+        params.s0 = 0.1;      // Не используется в модели Луки
+        params.r = 0.0;       // Нет рекомбинации у гриппа
+        params.f0 = 0.01;
+        params.muL = 0.01;     // В среднем 1 мутация на гаплотип за поколение (реалистичнее)
+        params.tf = 150;      // 500 поколений для наблюдения долговременной динамики
+        params.M = 3;         // Начальное разнообразие
+
+        // Параметры модели Лукши-Лассига
+        LukszaParams l_params;
+        l_params.D0 = 14.0;           // Соответствует статье
+        l_params.L_ep = 50;           // длина эпитопной части (33%)
+        l_params.T_memory = 7;        // иммунной памяти
+        l_params.sigma_ne = 0.5;      // Оптимально по статье
+
         // Запускаем симуляцию
-        MonteCarlo MC(params);
+        MonteCarlo MC(params, l_params);
+        auto start = chrono::high_resolution_clock::now();
         MC.RunSimulation();
+        auto end = chrono::high_resolution_clock::now();
+        cout << "Simulation time: " << chrono::duration_cast<chrono::seconds>(end - start).count() << "s\n\n";
         cout << "=========================================\n";
         system(("python fig1.py --dir " + params.output_dir + "/" + params.exp_name + " --output " + params.plot_dir + "/" + params.exp_name).c_str());
         cout << "=========================================\n";
     }
-    {
-        // Основной эксперимент с постоянным распределением отбора
-        cout << "=========================================\n";
-        StartParams params;
-        params.exp_name = "test2";
-        params.N = 1000;
-        params.L = 100;
-        params.s0 = 0.1;
-        params.r = 0;
-        params.f0 = 0;
-        params.muL = 0.1;
-        params.tf = 150;
-        params.M = 3;
-        // Запускаем симуляцию
-        MonteCarlo MC(params);
-        MC.RunSimulation();
-        cout << "=========================================\n";
-        system(("python fig1.py --dir " + params.output_dir + "/" + params.exp_name + " --output " + params.plot_dir + "/" + params.exp_name).c_str());
-        cout << "=========================================\n";
-    }
-    {
-        // Основной эксперимент с постоянным распределением отбора
-        cout << "=========================================\n";
-        StartParams params;
-        params.exp_name = "test3";
-        params.N = 1000;
-        params.L = 100;
-        params.s0 = 0.2;
-        params.r = 0;
-        params.f0 = 0;
-        params.muL = 0.1;
-        params.tf = 150;
-        params.M = 3;
-        // Запускаем симуляцию
-        MonteCarlo MC(params);
-        MC.RunSimulation();
-        cout << "=========================================\n";
-        system(("python fig1.py --dir " + params.output_dir + "/" + params.exp_name + " --output " + params.plot_dir + "/" + params.exp_name).c_str());
-        cout << "=========================================\n";
-    }
+    
     return 0;
 }

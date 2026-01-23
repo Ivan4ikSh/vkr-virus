@@ -1,0 +1,13 @@
+Simulation Parameters:
+N = 300
+L = 200
+s0 = 0.1
+r = 0
+f0 = 0
+muL = 0.1
+tf = 300
+M = 3
+distribution = 1
+exp_name = test1
+V_an = 0.36449
+V_num = 0.27455

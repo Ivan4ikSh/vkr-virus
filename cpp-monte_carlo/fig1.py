@@ -110,8 +110,7 @@ def plot_figure1_subplot221(hist_data, hist_times, ax, params=None):
         
         # Добавляем метку времени в конце кривой
         if len(xx) > 0 and len(nn) > 0 and nn[-1] > 0:
-            ax.text(xx[-1], nn[-1], f't={t}', fontsize=8, color=color, 
-                   ha='left', va='bottom', alpha=0.8)
+            ax.text(xx[-1], nn[-1], f't={t}', fontsize=8, color=color, ha='left', va='bottom', alpha=0.8)
     
     ax.set_xlabel('Число аллелей, k', fontsize=10)
     ax.set_ylabel('Функция распределения', fontsize=10)
@@ -141,8 +140,7 @@ def plot_figure1_subplot221(hist_data, hist_times, ax, params=None):
 def plot_figure1_subplot222(df, ax, params=None):
     """Построение subplot 222 - основные статистики"""
     if df is None or df.empty:
-        ax.text(0.5, 0.5, 'Нет данных для subplot 222', 
-                ha='center', va='center', fontsize=12)
+        ax.text(0.5, 0.5, 'Нет данных для subplot 222', ha='center', va='center', fontsize=12)
         return
     
     # Проверяем наличие необходимых столбцов
@@ -208,8 +206,7 @@ def plot_figure1_subplot222(df, ax, params=None):
 def plot_figure1_subplot223(df, ax, params=None):
     """Построение subplot 223 - частоты аллелей по локусам"""
     if df is None or df.empty:
-        ax.text(0.5, 0.5, 'Нет данных для subplot 223', 
-                ha='center', va='center', fontsize=12)
+        ax.text(0.5, 0.5, 'Нет данных для subplot 223', ha='center', va='center', fontsize=12)
         ax.set_xlabel('Время, t', fontsize=10)
         ax.set_ylabel('Частота аллеля во всех локусах', fontsize=10)
         return
@@ -225,8 +222,7 @@ def plot_figure1_subplot223(df, ax, params=None):
                          and not col.startswith('Unnamed')]
     
     if not locus_columns:
-        ax.text(0.5, 0.5, 'Нет данных о локусах', 
-                ha='center', va='center', fontsize=12)
+        ax.text(0.5, 0.5, 'Нет данных о локусах', ha='center', va='center', fontsize=12)
         return
     
     time = df['Time'] if 'Time' in df.columns else range(len(df))
@@ -237,8 +233,7 @@ def plot_figure1_subplot223(df, ax, params=None):
     
     # Рисуем теоретическую частоту f1_site (черный пунктир)
     if 'f1_site_theoretical' in df.columns:
-        ax.plot(time, df['f1_site_theoretical'], 'k--', 
-                linewidth=2.0, label='Теоретическая f1_site', alpha=0.8)
+        ax.plot(time, df['f1_site_theoretical'], 'k--', linewidth=2.0, label='Теоретическая f1_site', alpha=0.8)
     
     # Вычисляем среднюю частоту в последний момент времени
     if len(df) > 0 and len(locus_columns) > 0:
@@ -250,8 +245,7 @@ def plot_figure1_subplot223(df, ax, params=None):
     
     ax.set_xlabel('Время, t', fontsize=10)
     ax.set_ylabel('Частота аллеля во всех локусах', fontsize=10)
-    ax.set_title(f'Частоты аллелей во всех локусах\n{title_suffix}', 
-                 fontsize=9, pad=10)
+    ax.set_title(f'Частоты аллелей во всех локусах\n{title_suffix}', fontsize=9, pad=10)
     ax.grid(True, alpha=0.3, linestyle='--')
     ax.set_xlim([0, time.max() if len(time) > 0 else 1])
     ax.set_ylim([0, 1])
@@ -263,8 +257,7 @@ def plot_figure1_subplot223(df, ax, params=None):
 def plot_figure1_subplot224(hist_data, hist_times, ax, params=None):
     """Построение subplot 224 - гистограммы частот аллелей"""
     if not hist_data:
-        ax.text(0.5, 0.5, 'Нет данных для subplot 224', 
-                ha='center', va='center', fontsize=12)
+        ax.text(0.5, 0.5, 'Нет данных для subplot 224', ha='center', va='center', fontsize=12)
         return
     
     colors = ['r', 'g', 'b', 'm', 'c', 'y', 'k', 'r', 'g', 'b', 'm', 'c', 'y', 'k']
@@ -289,13 +282,11 @@ def plot_figure1_subplot224(hist_data, hist_times, ax, params=None):
             valid_indices = np.where(nn > 0)[0]
             if len(valid_indices) > 0:
                 last_idx = valid_indices[-1]
-                ax.text(xx[last_idx], nn[last_idx], f't={t}', 
-                       fontsize=8, color=color, ha='left', va='bottom', alpha=0.8)
+                ax.text(xx[last_idx], nn[last_idx], f't={t}', fontsize=8, color=color, ha='left', va='bottom', alpha=0.8)
     
     ax.set_xlabel('Частота аллеля в локусе', fontsize=10)
     ax.set_ylabel('Гистограмма', fontsize=10)
-    ax.set_title('Гистограмма в несколько фиксированных времен', 
-                 fontsize=9, pad=10)
+    ax.set_title('Гистограмма в несколько фиксированных времен', fontsize=9, pad=10)
     ax.grid(True, alpha=0.3, linestyle='--')
     
     # Устанавливаем разумные пределы по осям
@@ -342,18 +333,14 @@ def plot_figure1_all(data_dir, output_file=None):
     if hist_data_221 is not None and hist_times_221:
         plot_figure1_subplot221(hist_data_221, hist_times_221, ax1, params)
     else:
-        ax1.text(0.5, 0.5, 'Нет данных для subplot 221', 
-                ha='center', va='center', fontsize=14)
+        ax1.text(0.5, 0.5, 'Нет данных для subplot 221', ha='center', va='center', fontsize=14)
     
     # Subplot 222: основные статистики
     plot_figure1_subplot222(df_subplot2, ax2, params)
-    
     # Subplot 223: частоты по локусам
     plot_figure1_subplot223(df_subplot3, ax3, params)
-    
     # Subplot 224: гистограммы частот аллелей
     plot_figure1_subplot224(hist_data_224, hist_times_224, ax4, params)
-    
     # Общий заголовок для всей фигуры (опционально)
     if params:
         exp_name = params.get('exp_name', 'experiment')
@@ -368,7 +355,7 @@ def plot_figure1_all(data_dir, output_file=None):
         plt.savefig(output_file, dpi=300, bbox_inches='tight')
         print(f"Полная figure1 сохранена в: {output_file}")
     
-    #plt.show()
+    plt.show()
     
     # Выводим информацию о загруженных данных
     print("\nСтатус загрузки данных:")

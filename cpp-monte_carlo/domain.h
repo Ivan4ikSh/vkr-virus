@@ -2,21 +2,26 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
+#include <deque>
 #include <execution>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <iterator>
 #include <map>
 #include <numeric>
 #include <random>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 using namespace std;
 
 namespace CONST {
     const double PI = 3.1415926535897932;
+    bool USE_LUKSZA = false;
 }
 
 // Типы распределений для коэффициентов отбора
@@ -57,15 +62,22 @@ struct StartParams {
     }
 };
 
+struct LukszaParams {
+    // Основные параметры модели
+    int L_ep;           // Длина эпитопной части
+    double sigma_ne;    // Коэффициент нагрузки неэпитопных мутаций
+    double D0;          // Параметр угасания иммунитета
+    int T_memory;       // Глубина иммунной памяти
+};
+
 struct SimulationParams {
     // Вычисленные параметры
-    double mu;      // частота мутаций на локус
-    vector<int> T;  // времена (0, 1, 2, ..., tf)
-    // Массив коэффициентов отбора для каждого локуса
-    vector<double> s;
-    // Аналитическая и численная скорости адаптации
-    double V_an;
-    double V_num;
+    double mu;        // частота мутаций на локус
+    vector<int> T;    // времена (0, 1, 2, ..., tf)
+    vector<double> s; // Массив коэффициентов отбора для каждого локуса
+    
+    double V_an;  // Аналитическая скорость адаптации
+    double V_num; // Численная скорость адаптации
     // Настройки для графиков/анализа
     int t_int;           // интервал времени для графиков
     double f_sample;     // процент выборки для пар
@@ -89,7 +101,6 @@ struct SimulationParams {
     vector<double> C_all;           // ?
     vector<double> mean_W;          // средняя приспособленность
 
-    string colors;
     vector<double> dist_over_L;             // добавьте это для хранения dist/L
     vector<double> f1_site;                 // теоретические частоты
     vector<vector<double>> fitness_hist_xx; // центры бинов для гистограмм
