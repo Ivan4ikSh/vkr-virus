@@ -16,7 +16,7 @@ using namespace std;
 namespace CONST {
     const string OUTPUT_DIR_NAME = "output";
     const string VISUALIZE_PYTHON = "visualize.py";
-    const double EPS = 1e-10;
+    const double EPS = 1e-5;
 }
 
 // Тип асимметрии иммунитета
@@ -32,7 +32,7 @@ struct BoundingBox {
     int margin;       // Запас вокруг волны
 
     // Конструктор с инициализацией по умолчанию
-    BoundingBox() : i_min(0), i_max(0), j_min(0), j_max(0), margin(5) {}
+    BoundingBox() : i_min(0), i_max(0), j_min(0), j_max(0), margin(1) {}
 
     // Метод для сброса границ
     void reset() {
@@ -78,7 +78,6 @@ struct ModelParameters {
     int T0;    // Начало отображения (0)
     AsymmetryType asymmetry; // Тип асимметрии иммунитета
     int M; // Число шагов по времени = Tmax/stept
-    int update_box_freq; // Частота обновления bounding box
 };
 
 ModelParameters InitParameters() {
@@ -90,13 +89,12 @@ ModelParameters InitParameters() {
     params_.N = 1e10;
     params_.init_infected = 1e-2;
     params_.L = 50;
-    params_.Tmax = 800;
+    params_.Tmax = 600;
     params_.stept = 1;
-    params_.tshow = 100;
+    params_.tshow = 50;
     params_.T0 = 0;
     params_.M = params_.Tmax / params_.stept;
     params_.asymmetry = ANI_ASY;
-    params_.update_box_freq = 10; // Обновляем bounding box каждые 10 шагов
     return params_;
 }
 
@@ -114,18 +112,15 @@ class EpidemicSimulator {
 public:
     EpidemicSimulator() {
         params_ = InitParameters();
-        X = GenerateX(params_);
-        Y = GenerateY(params_);
-        K = GenerateImmunityMatrix(X, Y, params_);
-        InitializeState(I, R, params_);
+        X = GenerateX();
+        Y = GenerateY();
+        K = GenerateImmunityMatrix(X, Y);
+        InitializeState(I, R);
         norm.resize(params_.M, 0.0);
         finf.resize(params_.M, 0.0);
 
-        // Инициализируем bounding box
-        box.margin = 5; // Запас в 5 клеток
-        UpdateBoundingBoxFromMatrix(I, CONST::EPS);
-        UpdateBoundingBoxFromMatrix(R, CONST::EPS);
-        box.expand(params_.L);
+        box.margin = 3;
+        UpdateBoundingBox();
     }
 
     void Run() {
@@ -135,8 +130,6 @@ public:
 
         cout << "1. Initializing model parameters...\n";
         PrintParameters();
-        cout << "2. Initializing state matrices.\n";
-        CheckInitialConditions();
         cout << "\n========================================\n";
         cout << "INITIALIZATION COMPLETE\n";
         cout << "Ready to start simulation of " << params_.M << " time steps\n";
@@ -162,38 +155,14 @@ private:
     vector<double> finf;
     BoundingBox box;
 
-    void UpdateBoundingBoxFromMatrix(const vector<vector<double>>& matrix, double threshold = CONST::EPS) {
-        bool found = false;
-
-        for (int i = 0; i < matrix.size(); ++i) {
-            for (int j = 0; j < matrix[i].size(); ++j) {
-                if (matrix[i][j] > threshold) {
-                    if (!found) {
-                        box.reset();
-                        found = true;
-                    }
-                    box.update(i, j);
-                }
-            }
-        }
-
-        // Если ничего не нашли, используем весь диапазон
-        if (!found) {
-            box.i_min = 0;
-            box.i_max = matrix.size() - 1;
-            box.j_min = 0;
-            box.j_max = matrix[0].size() - 1;
-        }
-    }
-
-    void UpdateBoundingBoxFromBothMatrices(double threshold = CONST::EPS) {
+    void UpdateBoundingBox() {
         bool found = false;
         int L = params_.L;
 
         // Проверяем обе матрицы
         for (int i = 0; i < L; ++i) {
             for (int j = 0; j < L; ++j) {
-                if (I[i][j] > threshold || R[i][j] > threshold) {
+                if (I[i][j] > CONST::EPS || R[i][j] > CONST::EPS) {
                     if (!found) {
                         box.reset();
                         found = true;
@@ -236,39 +205,7 @@ private:
         file.close();
     }
 
-    vector<vector<double>> GenerateX(const ModelParameters& params_) {
-        int L = params_.L;
-        double Varx = params_.Varx;
-        random_device rd;
-        mt19937 gen(rd());
-        uniform_real_distribution<> dis(-1.0, 1.0);
-
-        vector<vector<double>> X(L, vector<double>(L));
-        for (int i = 0; i < L; ++i) {
-            for (int j = 0; j < L; ++j) {
-                X[i][j] = j + Varx * dis(gen);
-            }
-        }
-        return X;
-    }
-
-    vector<vector<double>> GenerateY(const ModelParameters& params_) {
-        int L = params_.L;
-        double Varx = params_.Varx;
-        random_device rd;
-        mt19937 gen(rd());
-        uniform_real_distribution<> dis(-1.0, 1.0);
-
-        vector<vector<double>> Y(L, vector<double>(L));
-        for (int i = 0; i < L; ++i) {
-            for (int j = 0; j < L; ++j) {
-                Y[i][j] = i + Varx * dis(gen);
-            }
-        }
-        return Y;
-    }
-
-    vector<vector<vector<vector<double>>>> GenerateImmunityMatrix(const vector<vector<double>>& X, const vector<vector<double>>& Y, const ModelParameters& params_) {
+    vector<vector<vector<vector<double>>>> GenerateImmunityMatrix(const vector<vector<double>>& X, const vector<vector<double>>& Y) {
         int L = params_.L;
         double a = params_.a;
         AsymmetryType asymmetry = params_.asymmetry;
@@ -306,7 +243,7 @@ private:
         return K;
     }
 
-    void InitializeState(vector<vector<double>>& I, vector<vector<double>>& R, const ModelParameters& params_) {
+    void InitializeState(vector<vector<double>>& I, vector<vector<double>>& R) {
         int L = params_.L;
         I = vector<vector<double>>(L, vector<double>(L, 0.0));
         R = vector<vector<double>>(L, vector<double>(L, 0.0));
@@ -340,15 +277,9 @@ private:
         vector<vector<double>> Inew(L, vector<double>(L, 0.0));
         auto sim_start = chrono::high_resolution_clock::now();
 
-        cout << "Initial bounding box: [" << box.i_min << ":" << box.i_max << ", "
-            << box.j_min << ":" << box.j_max << "]" << endl;
+        cout << "Initial bounding box: [" << box.i_min << ":" << box.i_max << ", " << box.j_min << ":" << box.j_max << "]" << endl;
 
         for (int k = 0; k < M; ++k) {
-            // Периодически обновляем bounding box
-            if (k % params_.update_box_freq == 0) {
-                UpdateBoundingBoxFromBothMatrices();
-            }
-
             // Вычисление нормировки и доли инфицированных
             double total_I = SumMatrix(I);
             double total_R = SumMatrix(R);
@@ -364,7 +295,6 @@ private:
                 }
             }
 
-            // Основной цикл по всем клеткам решётки В bounding box
             for (int i = box.i_min; i <= box.i_max; ++i) {
                 for (int j = box.j_min; j <= box.j_max; ++j) {
                     // Q: сумма по всем R[m][n] * K[i][j][m][n]
@@ -386,9 +316,6 @@ private:
 
                     // Обновление инфицированных
                     Inew[i][j] = I_old[i][j] * (1.0 + stept * (R0 * Q - 1.0));
-
-                    // Обновление выздоровевших (R)
-                    // ВАЖНО: Используем текущее значение R, а не умножаем на него дважды
                     R[i][j] = R[i][j] * (1.0 - stept * R0 * P) + stept * I_old[i][j];
                 }
             }
@@ -396,9 +323,7 @@ private:
             // Добавление мутационного члена (диффузия) ТОЛЬКО внутри bounding box
             for (int i = max(1, box.i_min); i <= min(L - 2, box.i_max); ++i) {
                 for (int j = max(1, box.j_min); j <= min(L - 2, box.j_max); ++j) {
-                    double mutation_term = I_old[i][j + 1] + I_old[i][j - 1] +
-                        I_old[i - 1][j] + I_old[i + 1][j] -
-                        4.0 * I_old[i][j];
+                    double mutation_term = I_old[i][j + 1] + I_old[i][j - 1] + I_old[i - 1][j] + I_old[i + 1][j] - 4.0 * I_old[i][j];
                     Inew[i][j] += stept * D * mutation_term;
                 }
             }
@@ -425,30 +350,23 @@ private:
 
                 SaveMatrixToFile(I, filename_I.str());
                 SaveMatrixToFile(R, filename_R.str());
-
-                // Также сохраняем информацию о bounding box
-                ofstream box_file(CONST::OUTPUT_DIR_NAME + "/box_info.txt", ios::app);
-                if (box_file.is_open()) {
-                    box_file << "Step " << k << ": [" << box.i_min << ":" << box.i_max
-                        << ", " << box.j_min << ":" << box.j_max << "]" << endl;
-                    box_file.close();
-                }
             }
-
             // Прогресс
             if (M >= 10 && k % (M / 10) == 0 && k > 0) {
                 double progress = 100.0 * k / M;
                 cout << "\tProgress: " << fixed << setprecision(1) << progress << "%" << endl;
-                cout << "\tBounding box size: " << (box.i_max - box.i_min + 1)
-                    << "x" << (box.j_max - box.j_min + 1) << endl;
+                cout << "\tBounding box size: " << (box.i_max - box.i_min + 1) << "x" << (box.j_max - box.j_min + 1) << endl;
+                cout << "\tBounding box: [" << box.i_min << ":" << box.i_max << ", " << box.j_min << ":" << box.j_max << "]" << endl;
+
             }
+
+            UpdateBoundingBox();
         }
 
         auto sim_end = chrono::high_resolution_clock::now();
         auto sim_duration = chrono::duration_cast<chrono::seconds>(sim_end - sim_start);
         cout << "\nSimulation completed in " << sim_duration.count() << " seconds" << endl;
-        cout << "Final bounding box: [" << box.i_min << ":" << box.i_max << ", "
-            << box.j_min << ":" << box.j_max << "]" << endl;
+        cout << "Final bounding box: [" << box.i_min << ":" << box.i_max << ", " << box.j_min << ":" << box.j_max << "]" << endl;
     }
 
     void PrintFinalStatistics() {
@@ -478,8 +396,6 @@ private:
         cout << "Maximum infection at cell (" << max_i << "," << max_j << "): " << max_I << endl;
         cout << "Corresponding X coordinate: " << X[max_i][max_j] << endl;
         cout << "Corresponding Y coordinate: " << Y[max_i][max_j] << endl;
-        cout << "Final bounding box size: " << (box.i_max - box.i_min + 1)
-            << "x" << (box.j_max - box.j_min + 1) << endl;
     }
 
     void SaveTimeSeriesData() {
@@ -523,22 +439,44 @@ private:
         cout << "\tTime step = " << params_.stept << endl;
         cout << "\tSave interval = " << params_.tshow << endl;
         cout << "\tBounding box margin: " << box.margin << endl;
-        cout << "\tUpdate box frequency: " << params_.update_box_freq << endl;
     }
 
-    void CheckInitialConditions() {
-        double total_I = SumMatrix(I);
-        double total_R = SumMatrix(R);
-        cout << "\tTotal infected: " << total_I << " (expected: " << params_.init_infected << ")\n";
-        cout << "\tTotal recovered: " << total_R << " (expected: " << 1.0 - params_.init_infected << ")\n";
-        cout << "\tTotal population: " << total_I + total_R << " (should be 1.0)\n";
-        cout << "\tInitial bounding box: [" << box.i_min << ":" << box.i_max << ", " << box.j_min << ":" << box.j_max << "]" << endl;
+    vector<vector<double>> GenerateX() {
+        int L = params_.L;
+        double Varx = params_.Varx;
+        random_device rd;
+        mt19937 gen(rd());
+        uniform_real_distribution<> dis(-1.0, 1.0);
+
+        vector<vector<double>> X(L, vector<double>(L));
+        for (int i = 0; i < L; ++i) {
+            for (int j = 0; j < L; ++j) {
+                X[i][j] = j + Varx * dis(gen);
+            }
+        }
+        return X;
+    }
+
+    vector<vector<double>> GenerateY() {
+        int L = params_.L;
+        double Varx = params_.Varx;
+        random_device rd;
+        mt19937 gen(rd());
+        uniform_real_distribution<> dis(-1.0, 1.0);
+
+        vector<vector<double>> Y(L, vector<double>(L));
+        for (int i = 0; i < L; ++i) {
+            for (int j = 0; j < L; ++j) {
+                Y[i][j] = i + Varx * dis(gen);
+            }
+        }
+        return Y;
     }
 };
 
 int main() {
     srand(time(NULL));
-    // Создаем директорию для вывода, если её нет
+
     filesystem::create_directory(CONST::OUTPUT_DIR_NAME);
     EpidemicSimulator simulator;
     simulator.Run();
