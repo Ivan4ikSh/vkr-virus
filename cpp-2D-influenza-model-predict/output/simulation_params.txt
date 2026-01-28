@@ -1,9 +1,0 @@
-R0=2.6
-D=0.0001
-a=7
-N=1e10
-Varx=0.01
-L=50
-Tmax=600
-stept=1
-asymmetry=ANI_ASY

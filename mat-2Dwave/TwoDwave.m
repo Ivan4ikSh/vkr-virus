@@ -20,11 +20,11 @@ tshow=100;              % SHOW AT INTERVALS
 T0=00;                 % start plotting
 stept=1;                % step in time 
 M=Tmax/stept;           % number of time points
-
+SEED = 3;
 %% Immunity matrix
-rand;
+rng(SEED); % ошибка трансяционной репрессии
 %% Projection of lattice on x + disorder
-X=(ones(L,1)*(1:L)+varx*(2*rand(L,L)-1)); 
+X=(ones(L,1)*(1:L)+varx*(2*rand(L,L)-1));
 % Projection on y + disorder
 Y=((1:L)'*ones(1,L)+varx*(2*rand(L,L)-1)); 
 %% Projection of lattice onto diagonal + disorder
