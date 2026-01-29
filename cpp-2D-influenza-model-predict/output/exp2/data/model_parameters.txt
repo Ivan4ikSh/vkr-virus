@@ -1,0 +1,19 @@
+MODEL_PARAMETERS:
+===============
+Grid size L: 50x50
+Reproductive number R0: 3.100000
+Mutation probability D: 0.000100
+Immunity distance a: 7.000000
+Coordinate spread Varx: 0.010000
+Total population N: 1.000000e+10
+Initial infected fraction: 0.010000
+Show interval tshow: 20
+Start time T0: 0
+Total steps M: 1200
+Asymmetry type: Isotropic (2 antigenic coordinates)
+
+SIMULATION_INFO:
+===============
+Output directory: output/exp2
+Data subdirectory: data
+Total steps saved: 61
