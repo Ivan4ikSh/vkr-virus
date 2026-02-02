@@ -18,63 +18,30 @@ namespace CONST {
     const string VISUALIZE_PYTHON = "visualize.py";
     const string OUTPUT_DIR_NAME = "output";
     const string DATA_DIR = "data";
-    const double EPS = 1e-10;
+    const double EPS = 1e-5;
+    const double PI = 3.1415926535897932;
+    enum Form {
+        LINE,
+        CLOUD,
+        SQUARE
+    };
+    const Form FORM = SQUARE;
 }
 
 string OUTPUT_NAME = "output";
 
-// Тип асимметрии иммунитета
-enum AsymmetryType {
-    ANI_ASY, // Анизотропная, асимметричная (основной режим статьи)
-    ANI_SYM, // Анизотропная, симметричная
-    ISO      // Изотропная (две антигенные координаты)
-};
-
-struct BoundingBox {
-    int i_min, i_max; // Границы по Y
-    int j_min, j_max; // Границы по X
-    int margin;       // Запас вокруг волны
-
-    BoundingBox() : i_min(0), i_max(0), j_min(0), j_max(0), margin(5) {}
-
-    void reset() {
-        i_min = INT_MAX;
-        i_max = INT_MIN;
-        j_min = INT_MAX;
-        j_max = INT_MIN;
-    }
-
-    bool is_valid() const {
-        return i_min <= i_max && j_min <= j_max;
-    }
-
-    void expand(int L) {
-        i_min = max(0, i_min - margin);
-        i_max = min(L - 1, i_max + margin);
-        j_min = max(0, j_min - margin);
-        j_max = min(L - 1, j_max + margin);
-    }
-
-    void update(int i, int j) {
-        i_min = min(i_min, i);
-        i_max = max(i_max, i);
-        j_min = min(j_min, j);
-        j_max = max(j_max, j);
-    }
-};
-
 struct ModelParameters {
-    int L;                   // Размер решётки L×L (50)
-    double R0;               // Базовый репродуктивный номер (2.6)
-    double D;                // Мутационная вероятность (0.0001)
-    double a;                // Полурасстояние иммунитета (7)
-    double Varx;             // Разброс координат (0.01)
-    double N;                // Общая численность популяции (1e10)
-    double init_infected;    // Начальная доля инфицированных (1e-2)
-    int tshow;               // Интервал отображения (100)
-    int T0;                  // Начало отображения (0)
-    AsymmetryType asymmetry; // Тип асимметрии иммунитета
-    int M;                   // Число шагов по времени = Tmax/stept
+    int L;                // Размер решётки LxL
+    double R0;            // Базовый репродуктивный номер
+    double D;             // Мутационная вероятность
+    double a;             // Полурасстояние иммунитета
+    double Varx;          // Разброс координат
+    double N;             // Общая численность популяции
+    double init_infected; // Начальная доля инфицированных
+    double asym;          // Коэффициент ассиметрии
+    int tshow;            // Интервал отображения
+    int T0;               // Начало отображения
+    int M;                // Число шагов по времени
 };
 
 struct pair_hash {
@@ -90,7 +57,7 @@ using SparseMatrix = unordered_map<pair<double, double>, double, pair_hash>;
 
 class EpidemicSimulator {
 public:
-    EpidemicSimulator(ModelParameters params) : params_(params){
+    EpidemicSimulator(ModelParameters params) : params_(params) {
         GenerateX();
         GenerateY();
         K_ = GenerateImmunityMatrix();
@@ -145,6 +112,22 @@ private:
         auto sim_start = chrono::high_resolution_clock::now();
 
         for (int k = 0; k < M; ++k) {
+            // Прогресс
+            if (M >= 10 && k % (M / 10) == 0 && k >= 0) {
+                int progress = 100 * k / M;
+                cout << " Progress: " << progress << "%" << endl;
+                cout << "  Infected count: " << I_.size() << endl;
+                cout << "  Recovered count: " << R_.size() << endl;
+            }
+            // Сохранение состояния
+            if (k >= params_.T0 && (static_cast<int>(k) % params_.tshow == 0)) {
+                stringstream filename_I, filename_R;
+                filename_I << CONST::OUTPUT_DIR_NAME + "/" + OUTPUT_NAME + "/" + CONST::DATA_DIR + "/state_I_step_" << k << ".csv";
+                filename_R << CONST::OUTPUT_DIR_NAME + "/" + OUTPUT_NAME + "/" + CONST::DATA_DIR + "/state_R_step_" << k << ".csv";
+
+                SaveSparseMatrixToFile(I_, filename_I.str());
+                SaveSparseMatrixToFile(R_, filename_R.str());
+            }
             // Вычисление нормировки и доли инфицированных
             double total_I = 0.0;
             for (const auto& entry : I_) total_I += entry.second;
@@ -162,7 +145,7 @@ private:
             SparseMatrix Rnew = R_old;
 
             // Получаем все клетки, которые нужно обновить
-            set<pair<double, double>> affected_cells = GetAffectedCells();
+            set<pair<int, int>> affected_cells = GetAffectedCells();
 
             // Предварительно вычисляем суммы для Q и P для каждой затронутой клетки
             SparseMatrix Q_values, P_values;
@@ -203,7 +186,6 @@ private:
 
                 // Обновление инфицированных
                 double I_new_val = I_old_val * R0 * Q;
-
                 // Мутации
                 if (i > 0 && i < L - 1 && j > 0 && j < L - 1) {
                     double mutation_term = 0.0;
@@ -217,10 +199,8 @@ private:
 
                 // Обновление выздоровевших
                 double R_new_val = R_old_val * (1.0 - R0 * P) + I_old_val;
-
                 // Применяем порог отсечения
                 if (I_new_val / norm_[k] > 1.0 / N) Inew[cell] = I_new_val;
-
                 if (R_new_val > CONST::EPS) Rnew[cell] = R_new_val;
                 else Rnew.erase(cell);
             }
@@ -228,22 +208,6 @@ private:
             // Обновляем глобальные матрицы
             I_ = Inew;
             R_ = Rnew;
-
-            // Сохранение состояния
-            if (k >= params_.T0 && (static_cast<int>(k) % params_.tshow == 0)) {
-                stringstream filename_I, filename_R;
-                filename_I << CONST::OUTPUT_DIR_NAME + "/" + OUTPUT_NAME + "/" + CONST::DATA_DIR + "/state_I_step_" << k << ".csv";
-                filename_R << CONST::OUTPUT_DIR_NAME + "/" + OUTPUT_NAME + "/" + CONST::DATA_DIR + "/state_R_step_" << k << ".csv";
-
-                SaveSparseMatrixToFile(I_, filename_I.str());
-                SaveSparseMatrixToFile(R_, filename_R.str());
-            }
-
-            // Прогресс
-            if (M >= 10 && k % (M / 10) == 0 && k > 0) {
-                double progress = 100.0 * k / M;
-                cout << "\tProgress: " << fixed << setprecision(1) << progress << "%" << endl;
-            }
         }
 
         auto sim_end = chrono::high_resolution_clock::now();
@@ -256,22 +220,94 @@ private:
         I_.clear();
         R_.clear();
 
-        // Инициализация инфицированных: вертикальная линия при x=16 (индекс 15)
-        int infected_line = 15;
-        double infected_per_cell = params_.init_infected / L;
-        for (int i = 0; i < L; ++i) {
-            I_[{i, infected_line}] = infected_per_cell;
-        }
-
-        // Инициализация выздоровевших: полоса слева от инфицированных
-        int susceptible_end = infected_line;
-        double susceptible_total = (1.0 - params_.init_infected);
-        double susceptible_per_cell = susceptible_total / (susceptible_end * L);
-
-        for (int j = 0; j < susceptible_end; ++j) {
+        switch (CONST::FORM)
+        {
+        case CONST::Form::LINE: {
+            // Инициализация инфицированных: вертикальная линия
+            int infected_line = 10;
+            double infected_per_cell = params_.init_infected / L;
             for (int i = 0; i < L; ++i) {
-                R_[{i, j}] = susceptible_per_cell;
+                I_[{i, infected_line}] = infected_per_cell;
             }
+
+            // Инициализация выздоровевших: полоса слева от инфицированных
+            int susceptible_end = infected_line;
+            double susceptible_total = (1.0 - params_.init_infected);
+            double susceptible_per_cell = susceptible_total / (susceptible_end * L);
+
+            for (int j = 0; j < susceptible_end; ++j) {
+                for (int i = 0; i < L; ++i) {
+                    R_[{i, j}] = susceptible_per_cell;
+                }
+            }
+        }
+            break;
+        case CONST::Form::CLOUD: {
+            int center_x = L / 2;
+            int center_y = L / 2;
+            //double radius = 1.4; 5 points
+            int side = 5;
+
+            for (int i = 0; i < L; ++i) {
+                for (int j = 0; j < L; ++j) {
+                    double dx = j - center_x;
+                    double dy = i - center_y;
+                    if (sqrt(dx * dx + dy * dy) <= side) I_[{i, j}] = params_.init_infected / (side * side);
+                }
+            }
+
+            double total_R = 1.0 - params_.init_infected;
+            int R_cells = L * L - I_.size();
+            double R_per_cell = total_R / R_cells;
+
+            for (int i = 0; i < L; ++i) {
+                for (int j = 0; j < L; ++j) {
+                    if (I_.find({ i, j }) == I_.end()) R_[{i, j}] = R_per_cell;
+                }
+            }
+        }
+            break;
+        case CONST::Form::SQUARE: {
+            int center_x = L / 2;
+            int center_y = L / 2;
+            int side = 10; // Размер стороны квадрата
+
+            // Гарантируем, что квадрат помещается в сетку
+            int start_i = max(0, center_y - side / 2);
+            int end_i = min(L - 1, center_y + side / 2);
+            int start_j = max(0, center_x - side / 2);
+            int end_j = min(L - 1, center_x + side / 2);
+
+            int actual_side_i = end_i - start_i + 1;
+            int actual_side_j = end_j - start_j + 1;
+            int infected_cells = actual_side_i * actual_side_j;
+
+            // Заполняем прямоугольную область (может быть меньше чем side×side у краев)
+            double infected_per_cell = params_.init_infected / infected_cells;
+            for (int i = start_i; i <= end_i; ++i) {
+                for (int j = start_j; j <= end_j; ++j) {
+                    I_[{i, j}] = infected_per_cell;
+                }
+            }
+
+            // Выздоровевшие - все остальные клетки
+            double total_R = 1.0 - params_.init_infected;
+            int R_cells = L * L - infected_cells;
+            double R_per_cell = total_R / R_cells;
+
+            for (int i = 0; i < L; ++i) {
+                for (int j = 0; j < L; ++j) {
+                    // Проверяем, не находится ли клетка в инфицированном квадрате
+                    bool is_infected = (i >= start_i && i <= end_i && j >= start_j && j <= end_j);
+                    if (!is_infected) {
+                        R_[{i, j}] = R_per_cell;
+                    }
+                }
+            }
+        }
+            break;
+        default:
+            break;
         }
     }
 
@@ -311,7 +347,6 @@ private:
     vector<vector<vector<vector<double>>>> GenerateImmunityMatrix() {
         int L = params_.L;
         double a = params_.a;
-        AsymmetryType asymmetry = params_.asymmetry;
         vector<vector<vector<vector<double>>>> K(L, vector<vector<vector<double>>>(L, vector<vector<double>>(L, vector<double>(L, 0.0))));
 
         for (int i = 0; i < L; ++i) {
@@ -321,24 +356,13 @@ private:
 
                 for (int m = 0; m < L; ++m) {
                     for (int n = 0; n < L; ++n) {
-                        double dist = 0.0;
-                        switch (asymmetry) {
-                        case ANI_SYM:
-                        case ANI_ASY:
-                            dist = fabs(X_[m][n] - X_ij) / a;
-                            break;
-                        case ISO:
-                            double dx = X_[m][n] - X_ij;
-                            double dy = Y_[m][n] - Y_ij;
-                            dist = sqrt(dx * dx + dy * dy) / a;
-                            break;
+                        double dx = X_ij - X_[m][n];
+                        if (dx > 0) {
+                            double dy = Y_ij - Y_[m][n];
+                            double dist = sqrt(dx * dx + params_.asym * dy * dy);
+                            K[i][j][m][n] = dist / (params_.a + dist);
                         }
-
-                        if (asymmetry == ANI_ASY) {
-                            if (X_[m][n] < X_ij) K[i][j][m][n] = dist / (1 + dist);
-                            else K[i][j][m][n] = 0.0;
-                        }
-                        else K[i][j][m][n] = dist / (1 + dist);
+                        else K[i][j][m][n] = 0.0;
                     }
                 }
             }
@@ -347,8 +371,8 @@ private:
     }
 
     // Получить множество всех клеток, которые могут быть затронуты на текущем шаге
-    set<pair<double, double>> GetAffectedCells() {
-        set<pair<double, double>> affected;
+    set<pair<int, int>> GetAffectedCells() {
+        set<pair<int, int>> affected;
 
         // Все текущие ненулевые клетки I и R
         for (const auto& entry : I_) {
@@ -359,7 +383,7 @@ private:
         }
 
         // Добавляем соседей для учёта мутаций
-        set<pair<double, double>> neighbors;
+        set<pair<int, int>> neighbors;
         for (const auto& cell : affected) {
             int i = cell.first;
             int j = cell.second;
@@ -408,7 +432,7 @@ private:
 
             norm__file.close();
             finf__file.close();
-            cout << "\tSaved time series data\n";
+            cout << " Saved time series data\n";
         }
     }
 
@@ -443,7 +467,7 @@ private:
         SaveSparseMatrixToFile(I_, CONST::OUTPUT_DIR_NAME + "/" + OUTPUT_NAME + "/" + CONST::DATA_DIR + "/final_I.csv");
         SaveSparseMatrixToFile(R_, CONST::OUTPUT_DIR_NAME + "/" + OUTPUT_NAME + "/" + CONST::DATA_DIR + "/final_R.csv");
     }
-    
+
     void SaveParametersToFile(const string& filename) {
         ofstream file(filename);
         if (file.is_open()) {
@@ -457,44 +481,27 @@ private:
             file << "Coordinate spread Varx: " << params_.Varx << "\n";
             file << "Total population N: " << scientific << params_.N << fixed << "\n";
             file << "Initial infected fraction: " << params_.init_infected << "\n";
+            file << "Asymmetry type: " << params_.asym << "\n";
             file << "Show interval tshow: " << params_.tshow << "\n";
             file << "Start time T0: " << params_.T0 << "\n";
             file << "Total steps M: " << params_.M << "\n";
 
-            // Тип асимметрии
-            string asymmetry_str;
-            switch (params_.asymmetry) {
-            case ANI_ASY: asymmetry_str = "Anisotropic Asymmetric (Main)"; break;
-            case ANI_SYM: asymmetry_str = "Anisotropic Symmetric"; break;
-            case ISO: asymmetry_str = "Isotropic (2 antigenic coordinates)"; break;
-            default: asymmetry_str = "Unknown";
-            }
-            file << "Asymmetry type: " << asymmetry_str << "\n";
-
-            file << "\nSIMULATION_INFO:\n";
-            file << "===============\n";
-            file << "Output directory: " << CONST::OUTPUT_DIR_NAME + "/" + OUTPUT_NAME << "\n";
-            file << "Data subdirectory: " << CONST::DATA_DIR << "\n";
-            file << "Total steps saved: " << min(params_.M, (int)(params_.M / params_.tshow) + 1) << "\n";
-
             file.close();
-            cout << "\tModel parameters saved to " << filename << endl;
+            cout << " Model parameters saved to " << filename << endl;
         }
-        else {
-            cerr << "Error: Could not open parameters file " << filename << endl;
-        }
+        else cerr << "Error: Could not open parameters file " << filename << endl;
     }
 
     void PrintParameters() {
         cout << fixed << setprecision(6);
-        cout << "\tL = " << params_.L << "x" << params_.L << endl;
-        cout << "\tR0 = " << params_.R0 << endl;
-        cout << "\tD = " << params_.D << endl;
-        cout << "\ta = " << params_.a << endl;
-        cout << "\tVarx = " << params_.Varx << endl;
-        cout << "\tN = " << scientific << params_.N << fixed << endl;
-        cout << "\tSteps = " << params_.M << endl;
-        cout << "\tSave interval = " << params_.tshow << endl;
+        cout << " L = " << params_.L << "x" << params_.L << endl;
+        cout << " R0 = " << params_.R0 << endl;
+        cout << " D = " << params_.D << endl;
+        cout << " a = " << params_.a << endl;
+        cout << " Varx = " << params_.Varx << endl;
+        cout << " N = " << scientific << params_.N << fixed << endl;
+        cout << " Steps = " << params_.M << endl;
+        cout << " Save interval = " << params_.tshow << endl;
     }
 
     void CheckInitialConditions() {
@@ -503,11 +510,11 @@ private:
         for (const auto& entry : I_) total_I += entry.second;
         for (const auto& entry : R_) total_R += entry.second;
 
-        cout << "\tTotal infected: " << total_I << " (expected: " << params_.init_infected << ")\n";
-        cout << "\tTotal recovered: " << total_R << " (expected: " << 1.0 - params_.init_infected << ")\n";
-        cout << "\tTotal population: " << total_I + total_R << " (should be 1.0)\n";
-        cout << "\tInitial non-zero infected cells: " << I_.size() << endl;
-        cout << "\tInitial non-zero recovered cells: " << R_.size() << endl;
+        cout << " Total infected: " << total_I << " (expected: " << params_.init_infected << ")\n";
+        cout << " Total recovered: " << total_R << " (expected: " << 1.0 - params_.init_infected << ")\n";
+        cout << " Total population: " << total_I + total_R << " (should be 1.0)\n";
+        cout << " Initial non-zero infected cells: " << I_.size() << endl;
+        cout << " Initial non-zero recovered cells: " << R_.size() << endl;
     }
 };
 
@@ -527,17 +534,17 @@ void InitDirectory(const string& data_dir) {
 
 void TEST(const string& experiment_name) {
     ModelParameters params;
-    params.R0 = 3.1;
+    params.R0 = 3.6;
     params.D = 0.0001;
-    params.a = 7;
-    params.Varx = 0.01;
+    params.a = 5;
+    params.Varx = 0.1;
     params.N = 1e10;
     params.init_infected = 1e-2;
     params.L = 50;
-    params.tshow = 20;
+    params.tshow = 5;
     params.T0 = 0;
-    params.M = 1200;
-    params.asymmetry = ISO;
+    params.M = 350;
+    params.asym = 0.3;
 
     OUTPUT_NAME = experiment_name;
     string data_dir = CONST::OUTPUT_DIR_NAME + "/" + OUTPUT_NAME;
@@ -545,14 +552,14 @@ void TEST(const string& experiment_name) {
     
     EpidemicSimulator simulator(params);
     simulator.Run();
-        
+
     system(("python " + CONST::VISUALIZE_PYTHON + " --data-dir " + (data_dir + "/" + CONST::DATA_DIR) + " --animation " + data_dir + "/" + OUTPUT_NAME + ".gif --snapshot " + data_dir + "/" + OUTPUT_NAME + ".png").c_str());
 }
 
 int main() {
     srand(time(NULL));
+    TEST("exp1");
     TEST("exp2");
-    //TEST("exp2");
-    //TEST("exp3");
+    TEST("exp3");
     return 0;
 }

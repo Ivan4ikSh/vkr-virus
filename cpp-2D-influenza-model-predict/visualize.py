@@ -109,7 +109,7 @@ class VirusWaveVisualizer:
             "Show interval tshow": 100,
             "Start time T0": 0,
             "Total steps M": 1500,
-            "Asymmetry type": "Anisotropic Asymmetric (Main)",
+            "Asymmetry type": 1.0,
             "Note": "Parameters loaded from default values"
         }
     
@@ -161,7 +161,7 @@ class VirusWaveVisualizer:
             im = ax.imshow(composite, cmap=self.wave_cmap, aspect='auto', origin='lower', interpolation='gaussian')
             ax.set_title(f'Шаг: {self.extract_step_number(self.I_files[step_idx])}', fontsize=14, fontweight='bold')
             ax.set_xlabel('Антигенная координата (x)', fontsize=10)
-            ax.set_ylabel('Нейтральная координата (y)', fontsize=10)
+            ax.set_ylabel('Антигенная координата (y)', fontsize=10)
             ax.grid(True, alpha=0.3, linestyle='--')
             
             # Добавляем colorbar к каждому графику
@@ -217,7 +217,7 @@ class VirusWaveVisualizer:
         plt.tight_layout()
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
         print(f"Снимки сохранены как {save_path}")
-        plt.show()
+        #plt.show()
     
     def create_wave_animation(self, save_path="wave_evolution.gif", max_frames=20):
         """
@@ -276,7 +276,8 @@ class VirusWaveVisualizer:
             "Reproductive number R0", 
             "Mutation probability D",
             "Immunity distance a",
-            "Total population N"
+            "Total population N",
+            "Asymmetry type"
         ]
         
         russian_names = {
@@ -301,9 +302,6 @@ class VirusWaveVisualizer:
                 
                 russian_key = russian_names.get(key, key)
                 params_text += f"{russian_key}: {display_value}\n"
-        
-        if "Asymmetry type" in self.model_params:
-            params_text += f"\nТип асимметрии: {self.model_params['Asymmetry type']}\n"
         
         # Добавляем информацию о файлах и размере
         params_text += f"\nВсего шагов: {len(self.I_files)}\n"
@@ -355,7 +353,7 @@ def main():
     parser.add_argument('-d', '--data-dir', type=str, default='output', help='Директория с файлами данных (по умолчанию: output)')
     parser.add_argument('-a', '--animation', type=str, default='wave_evolution.gif', help='Имя файла для сохранения анимации (по умолчанию: wave_evolution.gif)')
     parser.add_argument('-s', '--snapshot', type=str, default='wave_snapshots.png', help='Имя файла для сохранения снимков (по умолчанию: wave_snapshots.png)')
-    parser.add_argument('--max-frames', type=int, default=300, help='Максимальное количество кадров в анимации (по умолчанию: 300)')
+    parser.add_argument('--max-frames', type=int, default=3000, help='Максимальное количество кадров в анимации (по умолчанию: 300)')
     
     args = parser.parse_args()
     
