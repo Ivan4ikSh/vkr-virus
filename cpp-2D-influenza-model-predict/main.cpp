@@ -60,10 +60,8 @@ public:
     EpidemicSimulator(ModelParameters params) : params_(params) {
         GenerateX();
         GenerateY();
-        K_ = GenerateImmunityMatrix();
+        GenerateImmunityMatrix();
         InitializeState();
-        norm_.resize(params_.M, 0.0);
-        finf_.resize(params_.M, 0.0);
     }
 
     void Run() {
@@ -102,6 +100,30 @@ private:
     vector<double> norm_;
     vector<double> finf_;
 
+    void GenerateImmunityMatrix() {
+        int L = params_.L;
+        double a = params_.a;
+        double asym = params_.asym;
+        vector<vector<vector<vector<double>>>> K(L, vector<vector<vector<double>>>(L, vector<vector<double>>(L, vector<double>(L, 0.0))));
+
+        for (int i = 0; i < L; ++i) {
+            for (int j = 0; j < L; ++j) {
+                double X_ij = X_[i][j];
+                double Y_ij = Y_[i][j];
+
+                for (int m = 0; m < L; ++m) {
+                    for (int n = 0; n < L; ++n) {
+                        double dx = X_ij - X_[m][n];
+                        double dy = Y_ij - Y_[m][n];
+                        double dist = sqrt(dx * dx + asym * dy * dy) / a;
+                        K[i][j][m][n] = dist / (1 + dist);
+                    }
+                }
+            }
+        }
+        K_ = move(K);
+    }
+
     void RunSimulation() {
         int L = params_.L;
         int M = params_.M;
@@ -121,7 +143,8 @@ private:
             }
             // Сохранение состояния
             if (k > params_.T0 && (static_cast<int>(k) % params_.tshow == 0)) {
-                stringstream filename_I, filename_R;
+                stringstream filename_I;
+                stringstream filename_R;
                 filename_I << CONST::OUTPUT_DIR_NAME + "/" + OUTPUT_NAME + "/" + CONST::DATA_DIR + "/state_I_step_" << k << ".csv";
                 filename_R << CONST::OUTPUT_DIR_NAME + "/" + OUTPUT_NAME + "/" + CONST::DATA_DIR + "/state_R_step_" << k << ".csv";
 
@@ -145,10 +168,9 @@ private:
 
             // Получаем все клетки, которые нужно обновить
             set<pair<int, int>> affected_cells = GetAffectedCells();
-
             // Предварительно вычисляем суммы для Q и P для каждой затронутой клетки
-            SparseMatrix Q_values, P_values;
-
+            SparseMatrix Q_values;
+            SparseMatrix P_values;
             for (const auto& cell : affected_cells) {
                 int i = cell.first;
                 int j = cell.second;
@@ -239,17 +261,17 @@ private:
                 }
             }
         }
-            break;
+                              break;
         case CONST::Form::CLOUD: {
             int center_x = L / 2;
             int center_y = L / 2;
-            double radius = 2.3;
+            double radius = 1.3;
 
             for (int i = 0; i < L; ++i) {
                 for (int j = 0; j < L; ++j) {
                     double dx = j - center_x;
                     double dy = i - center_y;
-                    if (sqrt(dx * dx + dy * dy) < radius) I_[{i, j}] = params_.init_infected / (CONST::PI * radius * radius);
+                    if (sqrt(dx * dx + dy * dy) < radius) I_[{i, j}] = params_.init_infected / (radius * radius);
                 }
             }
 
@@ -263,7 +285,7 @@ private:
                 }
             }
         }
-            break;
+                               break;
         case CONST::Form::GROUP: {
             // Вместо одного облака создаем 4 разделенных группы:
             int groups = 4;
@@ -291,10 +313,13 @@ private:
                 }
             }
         }
-            break;
+                               break;
         default:
             break;
         }
+
+        norm_.resize(params_.M, 0.0);
+        finf_.resize(params_.M, 0.0);
     }
 
 
@@ -330,30 +355,6 @@ private:
         }
     }
 
-    vector<vector<vector<vector<double>>>> GenerateImmunityMatrix() {
-        int L = params_.L;
-        double a = params_.a;
-        double asym = params_.asym;
-        vector<vector<vector<vector<double>>>> K(L, vector<vector<vector<double>>>(L, vector<vector<double>>(L, vector<double>(L, 0.0))));
-
-        for (int i = 0; i < L; ++i) {
-            for (int j = 0; j < L; ++j) {
-                double X_ij = X_[i][j];
-                double Y_ij = Y_[i][j];
-
-                for (int m = 0; m < L; ++m) {
-                    for (int n = 0; n < L; ++n) {
-                        double dx = X_ij - X_[m][n];
-                        double dy = Y_ij - Y_[m][n];
-                        double dist = sqrt(dx * dx + asym * dy * dy) / a;
-                        K[i][j][m][n] = dist / (1 + dist);
-                    }
-                }
-            }
-        }
-        return K;
-    }
-
     // Получить множество всех клеток, которые могут быть затронуты на текущем шаге
     set<pair<int, int>> GetAffectedCells() {
         set<pair<int, int>> affected;
@@ -383,9 +384,8 @@ private:
 
     void PrintFinalStatistics() {
         double final_total_I = 0.0;
-        for (const auto& entry : I_) final_total_I += entry.second;
-
         double final_total_R = 0.0;
+        for (const auto& entry : I_) final_total_I += entry.second;
         for (const auto& entry : R_) final_total_R += entry.second;
 
         cout << "\n========================================\n";
@@ -401,21 +401,21 @@ private:
     void SaveTimeSeriesData() {
         int M = params_.M;
 
-        ofstream norm__file(OUTPUT_NAME + "/norm__time_series.csv");
-        ofstream finf__file(OUTPUT_NAME + "/finf__time_series.csv");
+        ofstream norm_file(OUTPUT_NAME + "/norm__time_series.csv");
+        ofstream finf_file(OUTPUT_NAME + "/finf__time_series.csv");
 
-        if (norm__file.is_open() && finf__file.is_open()) {
-            norm__file << "Step,Time,norm_\n";
-            finf__file << "Step,Time,finf_\n";
+        if (norm_file.is_open() && finf_file.is_open()) {
+            norm_file << "Step,Time,norm_\n";
+            finf_file << "Step,Time,finf_\n";
 
             for (int k = 0; k < M; ++k) {
                 double time_val = k;
-                norm__file << k << "," << time_val << "," << norm_[k] << "\n";
-                finf__file << k << "," << time_val << "," << finf_[k] << "\n";
+                norm_file << k << "," << time_val << "," << norm_[k] << "\n";
+                finf_file << k << "," << time_val << "," << finf_[k] << "\n";
             }
 
-            norm__file.close();
-            finf__file.close();
+            norm_file.close();
+            finf_file.close();
             cout << " Saved time series data\n";
         }
     }
@@ -533,7 +533,7 @@ void TEST(const string& experiment_name) {
     OUTPUT_NAME = experiment_name;
     string data_dir = CONST::OUTPUT_DIR_NAME + "/" + OUTPUT_NAME;
     InitDirectory(data_dir);
-    
+
     EpidemicSimulator simulator(params);
     simulator.Run();
 

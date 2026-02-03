@@ -164,7 +164,7 @@ class VirusWaveVisualizer:
             ax.set_ylabel('Антигенная координата (y)', fontsize=10)
             ax.grid(True, alpha=0.3, linestyle='--')
             
-            # Добавляем colorbar к каждому графику
+                # Добавляем colorbar к каждому графику
             plt.colorbar(im, ax=ax, label='Интенсивность волны')
         
         # 6-я позиция - таблица с параметрами
