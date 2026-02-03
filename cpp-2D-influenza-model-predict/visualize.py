@@ -158,7 +158,7 @@ class VirusWaveVisualizer:
             composite = I * 0.8 + R * 0.4
             # Основной график
             ax = axes[idx]
-            im = ax.imshow(composite, cmap=self.wave_cmap, aspect='auto', origin='lower', interpolation='gaussian')
+            im = ax.imshow(composite, cmap=self.wave_cmap, aspect='auto', origin='lower')
             ax.set_title(f'Шаг: {self.extract_step_number(self.I_files[step_idx])}', fontsize=14, fontweight='bold')
             ax.set_xlabel('Антигенная координата (x)', fontsize=10)
             ax.set_ylabel('Антигенная координата (y)', fontsize=10)

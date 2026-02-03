@@ -23,9 +23,9 @@ namespace CONST {
     enum Form {
         LINE,
         CLOUD,
-        SQUARE
+        GROUP
     };
-    const Form FORM = SQUARE;
+    const Form FORM = CLOUD;
 }
 
 string OUTPUT_NAME = "output";
@@ -46,9 +46,9 @@ struct ModelParameters {
 
 struct pair_hash {
     template <class T1, class T2>
-    std::size_t operator() (const std::pair<T1, T2>& p) const {
-        auto h1 = std::hash<T1>{}(p.first);
-        auto h2 = std::hash<T2>{}(p.second);
+    size_t operator() (const pair<T1, T2>& p) const {
+        auto h1 = hash<T1>{}(p.first);
+        auto h2 = hash<T2>{}(p.second);
         return h1 ^ (h2 << 1);
     }
 };
@@ -113,14 +113,14 @@ private:
 
         for (int k = 0; k < M; ++k) {
             // Прогресс
-            if (M >= 10 && k % (M / 10) == 0 && k >= 0) {
+            if (M >= 10 && k % (M / 10) == 0 && k > 0) {
                 int progress = 100 * k / M;
                 cout << " Progress: " << progress << "%" << endl;
                 cout << "  Infected count: " << I_.size() << endl;
                 cout << "  Recovered count: " << R_.size() << endl;
             }
             // Сохранение состояния
-            if (k >= params_.T0 && (static_cast<int>(k) % params_.tshow == 0)) {
+            if (k > params_.T0 && (static_cast<int>(k) % params_.tshow == 0)) {
                 stringstream filename_I, filename_R;
                 filename_I << CONST::OUTPUT_DIR_NAME + "/" + OUTPUT_NAME + "/" + CONST::DATA_DIR + "/state_I_step_" << k << ".csv";
                 filename_R << CONST::OUTPUT_DIR_NAME + "/" + OUTPUT_NAME + "/" + CONST::DATA_DIR + "/state_R_step_" << k << ".csv";
@@ -130,9 +130,8 @@ private:
             }
             // Вычисление нормировки и доли инфицированных
             double total_I = 0.0;
-            for (const auto& entry : I_) total_I += entry.second;
-
             double total_R = 0.0;
+            for (const auto& entry : I_) total_I += entry.second;
             for (const auto& entry : R_) total_R += entry.second;
 
             norm_[k] = total_I + total_R;
@@ -183,12 +182,11 @@ private:
 
                 double Q = Q_values[{i, j}];
                 double P = P_values[{i, j}];
-
                 // Обновление инфицированных
                 double I_new_val = I_old_val * R0 * Q;
                 // Мутации
+                double mutation_term = 0.0;
                 if (i > 0 && i < L - 1 && j > 0 && j < L - 1) {
-                    double mutation_term = 0.0;
                     mutation_term += (I_old.find({ i, j + 1 }) != I_old.end()) ? I_old[{i, j + 1}] : 0.0;
                     mutation_term += (I_old.find({ i, j - 1 }) != I_old.end()) ? I_old[{i, j - 1}] : 0.0;
                     mutation_term += (I_old.find({ i - 1, j }) != I_old.end()) ? I_old[{i - 1, j}] : 0.0;
@@ -224,7 +222,7 @@ private:
         {
         case CONST::Form::LINE: {
             // Инициализация инфицированных: вертикальная линия
-            int infected_line = 10;
+            int infected_line = L / 2;
             double infected_per_cell = params_.init_infected / L;
             for (int i = 0; i < L; ++i) {
                 I_[{i, infected_line}] = infected_per_cell;
@@ -245,14 +243,13 @@ private:
         case CONST::Form::CLOUD: {
             int center_x = L / 2;
             int center_y = L / 2;
-            //double radius = 1.4; 5 points
-            int side = 5;
+            double radius = 2.3;
 
             for (int i = 0; i < L; ++i) {
                 for (int j = 0; j < L; ++j) {
                     double dx = j - center_x;
                     double dy = i - center_y;
-                    if (sqrt(dx * dx + dy * dy) <= side) I_[{i, j}] = params_.init_infected / (side * side);
+                    if (sqrt(dx * dx + dy * dy) < radius) I_[{i, j}] = params_.init_infected / (CONST::PI * radius * radius);
                 }
             }
 
@@ -267,41 +264,30 @@ private:
             }
         }
             break;
-        case CONST::Form::SQUARE: {
-            int center_x = L / 2;
-            int center_y = L / 2;
-            int side = 10; // Размер стороны квадрата
+        case CONST::Form::GROUP: {
+            // Вместо одного облака создаем 4 разделенных группы:
+            int groups = 4;
+            int group_size = L / 8;
+            for (int g = 0; g < groups; ++g) {
+                int center_x = (g % 2) * (3 * L / 4) + L / 8;
+                int center_y = (g / 2) * (3 * L / 4) + L / 8;
 
-            // Гарантируем, что квадрат помещается в сетку
-            int start_i = max(0, center_y - side / 2);
-            int end_i = min(L - 1, center_y + side / 2);
-            int start_j = max(0, center_x - side / 2);
-            int end_j = min(L - 1, center_x + side / 2);
-
-            int actual_side_i = end_i - start_i + 1;
-            int actual_side_j = end_j - start_j + 1;
-            int infected_cells = actual_side_i * actual_side_j;
-
-            // Заполняем прямоугольную область (может быть меньше чем side×side у краев)
-            double infected_per_cell = params_.init_infected / infected_cells;
-            for (int i = start_i; i <= end_i; ++i) {
-                for (int j = start_j; j <= end_j; ++j) {
-                    I_[{i, j}] = infected_per_cell;
+                for (int i = center_y - group_size; i <= center_y + group_size; ++i) {
+                    for (int j = center_x - group_size; j <= center_x + group_size; ++j) {
+                        if (i >= 0 && i < L && j >= 0 && j < L) {
+                            I_[{i, j}] = params_.init_infected / (4 * (2 * group_size + 1) * (2 * group_size + 1));
+                        }
+                    }
                 }
             }
 
-            // Выздоровевшие - все остальные клетки
             double total_R = 1.0 - params_.init_infected;
-            int R_cells = L * L - infected_cells;
+            int R_cells = L * L - I_.size();
             double R_per_cell = total_R / R_cells;
 
             for (int i = 0; i < L; ++i) {
                 for (int j = 0; j < L; ++j) {
-                    // Проверяем, не находится ли клетка в инфицированном квадрате
-                    bool is_infected = (i >= start_i && i <= end_i && j >= start_j && j <= end_j);
-                    if (!is_infected) {
-                        R_[{i, j}] = R_per_cell;
-                    }
+                    if (I_.find({ i, j }) == I_.end()) R_[{i, j}] = R_per_cell;
                 }
             }
         }
@@ -347,6 +333,7 @@ private:
     vector<vector<vector<vector<double>>>> GenerateImmunityMatrix() {
         int L = params_.L;
         double a = params_.a;
+        double asym = params_.asym;
         vector<vector<vector<vector<double>>>> K(L, vector<vector<vector<double>>>(L, vector<vector<double>>(L, vector<double>(L, 0.0))));
 
         for (int i = 0; i < L; ++i) {
@@ -357,12 +344,9 @@ private:
                 for (int m = 0; m < L; ++m) {
                     for (int n = 0; n < L; ++n) {
                         double dx = X_ij - X_[m][n];
-                        if (dx > 0) {
-                            double dy = Y_ij - Y_[m][n];
-                            double dist = sqrt(dx * dx + params_.asym * dy * dy);
-                            K[i][j][m][n] = dist / (params_.a + dist);
-                        }
-                        else K[i][j][m][n] = 0.0;
+                        double dy = Y_ij - Y_[m][n];
+                        double dist = sqrt(dx * dx + asym * dy * dy) / a;
+                        K[i][j][m][n] = dist / (1 + dist);
                     }
                 }
             }
@@ -534,7 +518,7 @@ void InitDirectory(const string& data_dir) {
 
 void TEST(const string& experiment_name) {
     ModelParameters params;
-    params.R0 = 3.6;
+    params.R0 = 2.6;
     params.D = 0.0001;
     params.a = 5;
     params.Varx = 0.1;
@@ -543,8 +527,8 @@ void TEST(const string& experiment_name) {
     params.L = 50;
     params.tshow = 5;
     params.T0 = 0;
-    params.M = 350;
-    params.asym = 0.3;
+    params.M = 300;
+    params.asym = 1.0;
 
     OUTPUT_NAME = experiment_name;
     string data_dir = CONST::OUTPUT_DIR_NAME + "/" + OUTPUT_NAME;
@@ -558,8 +542,6 @@ void TEST(const string& experiment_name) {
 
 int main() {
     srand(time(NULL));
-    TEST("exp1");
-    TEST("exp2");
-    TEST("exp3");
+    TEST("test");
     return 0;
 }

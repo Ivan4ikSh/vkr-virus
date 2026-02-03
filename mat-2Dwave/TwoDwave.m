@@ -2,16 +2,15 @@
 % Based on 1D model Lin et al JTB 2003
 % Mutations in discrete genetic space 
 % x fluctuates around lattice sites
-
 %% Model parameters: D=1e-2, a=15, N=1e8 no ordering required in 1D
 R0=2.6;                  % basic reproduction ratio
 D=0.0001;                % mutation rate
 a=7;                  % immunity half-distance
 N=1e10;                 % total pop.size for  cutoff of tails
 varx=0.01;                 % max amplitude of variation 
-asymmetry='ani.asy';   % anysotropic, asymmetric in x
+%asymmetry='ani.asy';   % anysotropic, asymmetric in x
 %asymmetry='ani.sym';   % anysotropic, symmetric in x
-%asymmetry='iso';       % isotropic: 2 antigenic coordinates
+asymmetry='iso';       % isotropic: 2 antigenic coordinates
  
 %% Internal parameters
 L=50;                   % number of variants for each coordinate
@@ -56,11 +55,11 @@ end
   I=zeros(L,L); S=zeros(L,L); 
 %  I(L/2,10)=1e-2;               % Infected dot
 %  S(L/2,1:9)=(1-1e-2)/10;      % Susceptible tail
-   I(:,16)=1e-2/L;               % Infected line
-   S(:,1:15)=(1-1e-2)/15/L;      % Susceptible strip
+%   I(:,16)=1e-2/L;               % Infected line
+%   S(:,1:15)=(1-1e-2)/15/L;      % Susceptible strip
 %% elipsis in center
-%S=zeros(L,L); 
-%I=((X-L/2).^2+(Y-L/2).^2 < 5^2); I=I/sum(sum(I));
+S=zeros(L,L); 
+I=((X-L/2).^2+(Y-L/2).^2 < 5^2); I=I/sum(sum(I));
 %% near bottom left corner
 % I = (X > 25/a & X < 27/a); I = 1e-2*I/sum(sum(I)); % Infected front
 % S = X < 25/a; S = S*0.99/sum(sum(S));              % Susceptible corner
