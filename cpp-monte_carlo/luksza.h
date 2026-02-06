@@ -74,7 +74,7 @@ public:
         vector<double> fitness(N);
         for (int i = 0; i < N; ++i) {
             const string& hap = current_population_[i];
-            fitness[i] = final_fitness_map[hap];
+            fitness[i] = exp(final_fitness_map[hap]);
         }
 
         current_freq_ = ComputeFreq();

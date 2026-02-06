@@ -284,8 +284,7 @@ private:
     void RecordObservables(const int& t, const vector<double>& w) {
         // 1. Частоты аллелей в каждом локусе
         for (int locus = 0; locus < start_params_.L; ++locus) {
-            double allele_sum = accumulate(simulation_params_.K.begin(), simulation_params_.K.end(), 0.0,
-                [locus](double sum, const vector<int>& genome) { return sum + genome[locus]; });
+            double allele_sum = accumulate(simulation_params_.K.begin(), simulation_params_.K.end(), 0.0, [locus](double sum, const vector<int>& genome) { return sum + genome[locus]; });
             simulation_params_.f_site[t][locus] = allele_sum / static_cast<double>(start_params_.N);
         }
         // 2. Среднее число благоприятных аллелей на геном

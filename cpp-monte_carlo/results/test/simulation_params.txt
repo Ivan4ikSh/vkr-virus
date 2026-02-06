@@ -1,13 +1,13 @@
 Simulation Parameters:
 N = 1000
 L = 100
-s0 = 0.1
+s0 = 0.05
 r = 0
 f0 = 0.01
-muL = 0.01
-tf = 150
+muL = 0.5
+tf = 300
 M = 3
 distribution = 1
 exp_name = test
-V_an = 0.140495
-V_num = 0.04671
+V_an = 0.495495
+V_num = 0.02863
