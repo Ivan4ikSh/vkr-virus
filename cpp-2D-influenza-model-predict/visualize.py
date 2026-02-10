@@ -12,7 +12,6 @@ class VirusWaveVisualizer:
     def __init__(self, data_dir="output"):
         """
         Инициализация визуализатора для модели волн вирусной эволюции
-        
         Args:
             data_dir (str): Директория с файлами данных
         """
@@ -33,7 +32,7 @@ class VirusWaveVisualizer:
         
     def load_model_parameters(self):
         """Загружает параметры модели из файла model_parameters.txt"""
-        param_file = os.path.join(self.data_dir, "model_parameters.txt")
+        param_file = os.path.join(self.data_dir, "parameters.txt")
         
         if not os.path.exists(param_file):
             print(f"Файл параметров не найден: {param_file}")
@@ -116,7 +115,7 @@ class VirusWaveVisualizer:
     def find_data_files(self):
         """Находит все файлы с результатами в папке output"""
         self.I_files = sorted(glob.glob(os.path.join(self.data_dir, "state_I_step_*.csv")), key=self.extract_step_number)
-        self.R_files = sorted(glob.glob(os.path.join(self.data_dir, "state_R_step_*.csv")), key=self.extract_step_number)
+        self.S_files = sorted(glob.glob(os.path.join(self.data_dir, "state_S_step_*.csv")), key=self.extract_step_number)
         
         if len(self.I_files) > 0:
             print(f"Найдено {len(self.I_files)} шагов симуляции в директории '{self.data_dir}'")
@@ -130,7 +129,7 @@ class VirusWaveVisualizer:
     
     def load_matrix(self, filename):
         """Загружает матрицу из CSV файла"""
-        return np.loadtxt(filename, delimiter=',')
+        return np.loadtxt(filename, delimiter=';')
     
     def create_wave_snapshot(self, step_indices=None, save_path="wave_snapshots.png"):
         """
@@ -152,7 +151,7 @@ class VirusWaveVisualizer:
                 continue
                 
             I = self.load_matrix(self.I_files[step_idx])
-            R = self.load_matrix(self.R_files[step_idx])
+            R = self.load_matrix(self.S_files[step_idx])
             
             # Композитное изображение волны
             composite = I * 0.8 + R * 0.4
@@ -235,7 +234,7 @@ class VirusWaveVisualizer:
         
         # Загружаем первый кадр для инициализации
         I0 = self.load_matrix(self.I_files[0])
-        R0 = self.load_matrix(self.R_files[0])
+        R0 = self.load_matrix(self.S_files[0])
         
         # 1. Композитное изображение (верхний левый)
         ax1 = plt.subplot(gs[0, 0])
@@ -243,7 +242,7 @@ class VirusWaveVisualizer:
         im1 = ax1.imshow(composite0, cmap=self.wave_cmap, aspect='auto', origin='lower', interpolation='gaussian', animated=True)
         ax1.set_title('Волна эволюции (комета)', fontsize=12, fontweight='bold')
         ax1.set_xlabel('Антигенная координата (x)')
-        ax1.set_ylabel('Нейтральная координата (y)')
+        ax1.set_ylabel('Антигенная координата (y)')
         ax1.grid(True, alpha=0.3, linestyle='--')
         plt.colorbar(im1, ax=ax1, label='Интенсивность')
         
@@ -252,15 +251,15 @@ class VirusWaveVisualizer:
         im2 = ax2.imshow(I0, cmap='Reds', aspect='auto', origin='lower', animated=True)
         ax2.set_title('Инфицированные', fontsize=12, fontweight='bold')
         ax2.set_xlabel('Антигенная координата (x)')
-        ax2.set_ylabel('Нейтральная координата (y)')
+        ax2.set_ylabel('Антигенная координата (y)')
         plt.colorbar(im2, ax=ax2, label='Плотность инфицированных')
         
-        # 3. Выздоровевшие (нижний левый)
+        # 3. Восприимчивые (нижний левый)
         ax3 = plt.subplot(gs[1, 0])
         im3 = ax3.imshow(R0, cmap='Greens', aspect='auto', origin='lower', animated=True)
-        ax3.set_title('Выздоровевшие', fontsize=12, fontweight='bold')
+        ax3.set_title('Восприимчивые', fontsize=12, fontweight='bold')
         ax3.set_xlabel('Антигенная координата (x)')
-        ax3.set_ylabel('Нейтральная координата (y)')
+        ax3.set_ylabel('Антигенная координата (y)')
         plt.colorbar(im3, ax=ax3, label='Плотность выздоровевших')
         
         # 4. Параметры модели (нижний правый)
@@ -313,7 +312,7 @@ class VirusWaveVisualizer:
         def update(frame):
             # Загружаем данные для текущего кадра
             I = self.load_matrix(self.I_files[frame])
-            R = self.load_matrix(self.R_files[frame])
+            R = self.load_matrix(self.S_files[frame])
             
             # Обновляем изображения
             composite = I * 0.8 + R * 0.4
