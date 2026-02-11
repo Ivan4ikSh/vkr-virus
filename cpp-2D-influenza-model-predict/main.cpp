@@ -78,34 +78,23 @@ private:
     normal_distribution<double> normal_dist_;
 
 public:
-    EpidemicSimulator(ModelParameters params, int seed = time(nullptr)) : params_(params), generator_(seed),
-        uniform_dist_(0.0, 1.0),
-        exp_dist_(1.0),
-        normal_dist_(0.0, 1.0) {
-
+    EpidemicSimulator(ModelParameters params, int seed = time(nullptr)) : params_(params), generator_(seed), uniform_dist_(0.0, 1.0), exp_dist_(1.0), normal_dist_(0.0, 1.0) {
         GenerateCoordinates();
         InitializeState();
     }
 
     void Run() {
-        cout << "========================================\n";
-        cout << "2D MODEL OF ANTIGENIC EVOLUTION WITH COMETS\n";
-        cout << "========================================\n\n";
-
         PrintParameters();
         cout << "\nStarting simulation...\n";
 
         auto start_time = chrono::high_resolution_clock::now();
 
         for (int step = 0; step < params_.M; ++step) {
-            // Сохранение состояния
-            if (step >= params_.T0 && step % params_.tshow == 0) SaveCurrentState(step);
-            // Расчет статистик
+            if (step >= params_.T0 && step % params_.tshow == 0) SaveCurrentState(step); // Сохранение состояния
             CalculateStatistics(step);
-            // Отображение прогресса
             if (params_.M >= 10 && step % (params_.M / 10) == 0) cout << "Step " << step << "/" << params_.M << " (" << (100 * step / params_.M) << "%)" << " - Infected cells: " << CountInfectedCells() << endl;
-            // Один шаг симуляции
             StepSimulation();
+            NormalizePopulation();
         }
 
         auto end_time = chrono::high_resolution_clock::now();
@@ -169,10 +158,27 @@ private:
 
     double KFunc(int i1, int j1, int i2, int j2) {
         double dx = X_[i2][j2] - X_[i1][j1];
+        //if (dx <= 0.0) return 0.0;
         double dy = Y_[i2][j2] - Y_[i1][j1];
         double dist = sqrt(dx * dx + params_.asym * dy * dy);
         dist /= params_.a;
         return dist / (1.0 + dist);
+    }
+
+    void NormalizePopulation() {
+        double total_I = 0.0;
+        double total_S = 0.0;
+        for (auto& [p, st] : strains_) {
+            total_I += st.i_fitness;
+            total_S += st.s_fitness;
+        }
+
+        double total = total_I + total_S;
+        if (total <= 0.0) return;
+        for (auto& [p, st] : strains_) {
+            st.i_fitness /= total;
+            st.s_fitness /= total;
+        }
     }
 
     pair<double, double> GenerateMutationJump() {
@@ -204,63 +210,55 @@ private:
     }
 
     void StepSimulation() {
-        int L = params_.L;
-        double dt = params_.dt;
-        double R0 = params_.R0;
+        const int L = params_.L;
+        const double dt = params_.dt;
+        const double R0 = params_.R0;
+        const double Ub = params_.Ub;
+        const double mf = params_.mutation_fraction;
 
-        unordered_map<Point, Strain, PointHash> new_strains;
+        for (auto& [point, strain] : strains_) {
+            int i = point.x;
+            int j = point.y;
+            double I = strain.i_fitness;
+            double S = strain.s_fitness;
 
-        // Копируем текущее состояние
-        for (const auto& [point, strain] : strains_) {
-            new_strains[point] = strain;
-        }
-
-        // Обновляем каждую клетку
-        for (int i = 0; i < L; ++i) {
-            for (int j = 0; j < L; ++j) {
-                Point p{ i, j };
-
-                double I = strains_[p].i_fitness;
-                double S = strains_[p].s_fitness;
-
-                if (I < CONST::EPS && S < CONST::EPS) continue;
-                // Вычисляем Q (сумма по восприимчивым) и P (сумма по инфицированным)
-                double Q = 0.0;
-                double P = 0.0;
-                for (const auto& [point, strain] : strains_) {
-                    int m = point.x;
-                    int n = point.y;
-                    Q += strain.s_fitness * KFunc(i, j, m, n); // Q: сумма S * K для текущей клетки как источника инфекции
-                    P += strain.i_fitness * KFunc(m, n, i, j); // P: сумма I * K для текущей клетки как цели заражения
-                }
-                double dI_dt = I * (R0 * Q - 1.0); // dI/dt = I*(R0*Q - 1)
-                double new_I = I + dt * dI_dt;
-                double dS_dt = I - R0 * S * P; // dS/dt = -R0*S*P + I
-                double new_S = S + dt * dS_dt;
-                // Мутации
-                if (new_I > CONST::EPS && uniform_dist_(generator_) < params_.Ub * dt) {
-                    auto [dx, dy] = GenerateMutationJump();
-                    int new_i = i + (int)round(dx);
-                    int new_j = j + (int)round(dy);
-
-                    // Проверяем границы
-                    if (new_i >= 0 && new_i < L && new_j >= 0 && new_j < L) {
-                        Point new_p{ new_i, new_j };
-                        double mutated = params_.mutation_fraction * new_I;
-                        // Уменьшаем родительскую популяцию
-                        new_I -= mutated;
-                        // Добавляем мутанта
-                        if (new_strains.find(new_p) == new_strains.end()) new_strains[new_p] = { mutated, 0.0 };
-                        else new_strains[new_p].i_fitness += mutated;
-                    }
-                }
-                // Обновляем значения
-                if (new_I > CONST::EPS || new_S > CONST::EPS) new_strains[p] = { new_I, new_S };
+            if (I < CONST::EPS && S < CONST::EPS) continue;
+            // Вычисляем Q (сумма по восприимчивым) и P (сумма по инфицированным)
+            double Q = 0.0;
+            double P = 0.0;
+            for (const auto& [point, strain] : strains_) {
+                int m = point.x;
+                int n = point.y;
+                Q += strain.s_fitness * KFunc(i, j, m, n); // Q: сумма S * K для текущей клетки как источника инфекции
+                P += strain.i_fitness * KFunc(m, n, i, j); // P: сумма I * K для текущей клетки как цели заражения
             }
-        }
+            double dI_dt = I * (R0 * Q - 1.0); // dI/dt = I*(R0*Q - 1)
+            double new_I = I + dt * dI_dt;
+            double dS_dt = I - R0 * S * P; // dS/dt = -R0*S*P + I
+            double new_S = S + dt * dS_dt;
 
-        // Обновляем глобальное состояние
-        strains_ = move(new_strains);
+            // Мутации
+            if (new_I > CONST::EPS && uniform_dist_(generator_) < Ub * dt) {
+                auto [dx, dy] = GenerateMutationJump();
+                double new_x = X_[i][j] + dx;
+                double new_y = Y_[i][j] + dy;
+                int new_i = std::max(0, std::min(L - 1, (int)std::round(new_x)));
+                int new_j = std::max(0, std::min(L - 1, (int)std::round(new_y)));
+
+                // Проверяем границы
+                if (new_i >= 0 && new_i < L && new_j >= 0 && new_j < L) {
+                    Point new_p{ new_i, new_j };
+                    double mutated = mf * new_I;
+                    new_I -= mutated; // Уменьшаем родительскую популяцию
+                    strains_[new_p].i_fitness += mutated; // Добавляем мутанта
+                }
+            }
+            new_I = max(new_I, 0.0);
+            new_S = max(new_S, 0.0);
+
+            // Обновляем значения
+            if (new_I > CONST::EPS || new_S > CONST::EPS) strain = { new_I, new_S };
+        }
     }
 
     void CalculateStatistics(int step) {
@@ -407,19 +405,21 @@ void RunExperiment(const string& name) {
     cout << "========================================\n\n";
 
     ModelParameters params;
-    params.L = 40;
-    params.M = 300;
-    params.tshow = 10;
-    params.T0 = 0;
-    params.R0 = 3.0;
+    params.L = 30;
+    params.R0 = 2.6;
     params.Ub = 0.5;
-    params.a = 15.0;
+    params.a = 7.0;
     params.Varx = 0.1;
     params.asym = 1.0;
     params.beta = 2;
-    params.mutation_fraction = 0.5;
-    params.dt = 0.1;
+    params.mutation_fraction = 0.1;
     params.init_infected = 0.01;
+    params.dt = 0.1;
+
+    params.M = 800;
+    params.tshow = 5;
+    params.T0 = 0;
+    params.R0 = 2.8;
 
     OUTPUT_NAME = name;
     RADIUS = 1.0;
@@ -439,6 +439,6 @@ void RunExperiment(const string& name) {
 }
 
 int main() {
-    RunExperiment("exp3");
+    RunExperiment("exp");
     return 0;
 }
