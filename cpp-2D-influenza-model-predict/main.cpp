@@ -37,8 +37,8 @@ struct Point {
 };
 
 struct Strain {
-    double i_fitness;  // infected
-    double s_fitness;  // susceptible/recovered
+    int64_t I; // абсолютное число инфицированных
+    int64_t R; // абсолютное число восприимчивых
 };
 
 struct PointHash {
@@ -48,19 +48,18 @@ struct PointHash {
 };
 
 struct ModelParameters {
-    int L;                    // Размер решётки LxL
-    int M;                    // Число шагов по времени
-    int tshow;                // Интервал отображения
-    int T0;                   // Начало отображения
-    double R0;                // Базовый репродуктивный номер
-    double Ub;                // Частота мутаций на геном за шаг
-    double a;                 // Полурасстояние иммунитета
-    double Varx;              // Разброс координат
-    double asym;              // Коэффициент асимметрии
-    double beta;              // Параметр формы распределения скачков
-    double mutation_fraction; // Доля переносимых инфицированных при мутации
-    double dt;                // Шаг по времени
-    double init_infected;     // Начальная доля инфицированных
+    int L;                // размер решётки LxL
+    int M;                // число шагов по времени
+    int tshow;            // интервал отображения
+    int T0;               // начало отображения
+    double R0;            // базовый репродуктивный номер
+    double Ub;            // частота мутаций на геном за шаг
+    double a;             // полурасстояние иммунитета
+    double Varx;          // разброс координат
+    double asym;          // коэффициент асимметрии
+    double dt;            // шаг по времени
+    double init_infected; // начальная доля инфицированных
+    int64_t N_total;      // общая численность популяции
 };
 
 class EpidemicSimulator {
@@ -74,27 +73,30 @@ private:
     mt19937 generator_;
 
     uniform_real_distribution<double> uniform_dist_;
-    exponential_distribution<double> exp_dist_;
-    normal_distribution<double> normal_dist_;
 
 public:
-    EpidemicSimulator(ModelParameters params, int seed = time(nullptr)) : params_(params), generator_(seed), uniform_dist_(0.0, 1.0), exp_dist_(1.0), normal_dist_(0.0, 1.0) {
+    EpidemicSimulator(ModelParameters params, int seed = time(nullptr)) : params_(params), generator_(seed), uniform_dist_(0.0, 1.0) {
         GenerateCoordinates();
         InitializeState();
     }
 
     void Run() {
+        cout << "========================================\n";
+        cout << "2D MODEL OF ANTIGENIC EVOLUTION WITH COMETS\n";
+        cout << "========================================\n\n";
+
         PrintParameters();
         cout << "\nStarting simulation...\n";
 
         auto start_time = chrono::high_resolution_clock::now();
 
         for (int step = 0; step < params_.M; ++step) {
-            if (step >= params_.T0 && step % params_.tshow == 0) SaveCurrentState(step); // Сохранение состояния
+            if (step >= params_.T0 && step % params_.tshow == 0) SaveCurrentState(step);
             CalculateStatistics(step);
-            if (params_.M >= 10 && step % (params_.M / 10) == 0) cout << "Step " << step << "/" << params_.M << " (" << (100 * step / params_.M) << "%)" << " - Infected cells: " << CountInfectedCells() << endl;
+            if (params_.M >= 10 && step % (params_.M / 10) == 0)
+                cout << "Step " << step << "/" << params_.M << " (" << (100 * step / params_.M) << "%)"
+                << " - Infected cells: " << CountInfectedCells() << endl;
             StepSimulation();
-            NormalizePopulation();
         }
 
         auto end_time = chrono::high_resolution_clock::now();
@@ -127,28 +129,48 @@ private:
         int center_x = L / 2;
         int center_y = L / 2;
 
-        strains_.clear();
+        // Общее число клеток
+        int64_t total_cells = L * L;
+        int64_t people_per_cell = params_.N_total / total_cells;
+        int64_t remainder = params_.N_total % total_cells;
 
-        // Создаем начальное облако инфицированных
-        double infected_per_cell = params_.init_infected / (CONST::PI * RADIUS * RADIUS);
+        // Равномерное распределение населения по клеткам
+        vector<vector<int64_t>> population(L, vector<int64_t>(L, people_per_cell));
+        for (int i = 0; i < L && remainder > 0; ++i) {
+            for (int j = 0; j < L && remainder > 0; ++j) {
+                ++population[i][j];
+                --remainder;
+            }
+        }
 
+        // Подсчёт клеток внутри начального круга
+        int cells_in_circle = 0;
         for (int i = 0; i < L; ++i) {
             for (int j = 0; j < L; ++j) {
                 double dx = j - center_x;
                 double dy = i - center_y;
-                double dist2 = dx * dx + dy * dy;
-                if (dist2 <= RADIUS * RADIUS) strains_[{ i, j }] = { infected_per_cell, 0.0 };
+                if (dx * dx + dy * dy <= RADIUS * RADIUS) ++cells_in_circle;
             }
         }
 
-        // Распределяем восприимчивых по всем клеткам
-        double susceptible_total = 1.0 - params_.init_infected;
-        double susceptible_per_cell = susceptible_total / (L * L);
+        int64_t infected_total = static_cast<int64_t>(params_.init_infected * params_.N_total);
+        int64_t infected_per_cell = cells_in_circle ? infected_total / cells_in_circle : 0;
+        int64_t infected_rem = cells_in_circle ? infected_total % cells_in_circle : 0;
 
+        strains_.clear();
+        int infected_idx = 0;
         for (int i = 0; i < L; ++i) {
             for (int j = 0; j < L; ++j) {
-                if (strains_.find({ i, j }) == strains_.end()) strains_[{ i, j }] = { 0.0, susceptible_per_cell };
-                else strains_[{ i, j }].s_fitness += susceptible_per_cell;
+                int64_t tot = population[i][j];
+                int64_t I = 0;
+                double dx = j - center_x;
+                double dy = i - center_y;
+                if (dx * dx + dy * dy <= RADIUS * RADIUS && infected_idx < cells_in_circle) {
+                    I = infected_per_cell + (infected_idx < infected_rem ? 1 : 0);
+                    ++infected_idx;
+                }
+                int64_t S = tot - I;  // остальные восприимчивы
+                strains_[{i, j}] = { I, S };
             }
         }
 
@@ -156,167 +178,163 @@ private:
         finf_.resize(params_.M, 0.0);
     }
 
+    // Асимметричная кросс-иммунитетная функция: заражение возможно только если антигенная координата цели больше, чем источника
     double KFunc(int i1, int j1, int i2, int j2) {
         double dx = X_[i2][j2] - X_[i1][j1];
-        //if (dx <= 0.0) return 0.0;
+        //if (dx >= 0) return 0.0;  // запрет заражения «назад»
         double dy = Y_[i2][j2] - Y_[i1][j1];
+        //if (dy >= 0) return 0.0;  // запрет заражения «назад»
         double dist = sqrt(dx * dx + params_.asym * dy * dy);
         dist /= params_.a;
         return dist / (1.0 + dist);
     }
 
-    void NormalizePopulation() {
-        double total_I = 0.0;
-        double total_S = 0.0;
-        for (auto& [p, st] : strains_) {
-            total_I += st.i_fitness;
-            total_S += st.s_fitness;
-        }
-
-        double total = total_I + total_S;
-        if (total <= 0.0) return;
-        for (auto& [p, st] : strains_) {
-            st.i_fitness /= total;
-            st.s_fitness /= total;
-        }
-    }
-
-    pair<double, double> GenerateMutationJump() {
-        double dx;
-        double dy;
-
-        if (params_.beta == 1) {
-            // Экспоненциальное распределение
-            double r = exp_dist_(generator_);
-            double angle = uniform_dist_(generator_) * 2.0 * CONST::PI;
-            dx = r * cos(angle);
-            dy = r * sin(angle);
-        }
-        else if (params_.beta == 2) {
-            // Гауссово распределение
-            dx = normal_dist_(generator_);
-            dy = normal_dist_(generator_);
-        }
-        else {
-            // Общий случай (Вейбулла)
-            double u = uniform_dist_(generator_);
-            double r = pow(-log(u), 1.0 / params_.beta);
-            double angle = uniform_dist_(generator_) * 2.0 * CONST::PI;
-            dx = r * cos(angle);
-            dy = r * sin(angle);
-        }
-
-        return { dx, dy };
-    }
-
     void StepSimulation() {
-        const int L = params_.L;
-        const double dt = params_.dt;
-        const double R0 = params_.R0;
-        const double Ub = params_.Ub;
-        const double mf = params_.mutation_fraction;
+        int L = params_.L;
+        double dt = params_.dt;
+        double R0 = params_.R0;
+        double Ub = params_.Ub;
+        int64_t Ntot = params_.N_total;
 
-        for (auto& [point, strain] : strains_) {
-            int i = point.x;
-            int j = point.y;
-            double I = strain.i_fitness;
-            double S = strain.s_fitness;
+        unordered_map<Point, Strain, PointHash> new_strains = strains_; // Новое состояние после детерминированного шага (копируем текущее)
+        unordered_map<Point, int64_t, PointHash> mutation_flow; // Поток мутаций (изменение абсолютного числа инфицированных в клетках)
 
-            if (I < CONST::EPS && S < CONST::EPS) continue;
-            // Вычисляем Q (сумма по восприимчивым) и P (сумма по инфицированным)
-            double Q = 0.0;
-            double P = 0.0;
-            for (const auto& [point, strain] : strains_) {
-                int m = point.x;
-                int n = point.y;
-                Q += strain.s_fitness * KFunc(i, j, m, n); // Q: сумма S * K для текущей клетки как источника инфекции
-                P += strain.i_fitness * KFunc(m, n, i, j); // P: сумма I * K для текущей клетки как цели заражения
-            }
-            double dI_dt = I * (R0 * Q - 1.0); // dI/dt = I*(R0*Q - 1)
-            double new_I = I + dt * dI_dt;
-            double dS_dt = I - R0 * S * P; // dS/dt = -R0*S*P + I
-            double new_S = S + dt * dS_dt;
+        // Детерминированное обновление I и R и подготовка мутаций
+        for (int i = 0; i < L; ++i) {
+            for (int j = 0; j < L; ++j) {
+                Point p{ i, j };
 
-            // Мутации
-            if (new_I > CONST::EPS && uniform_dist_(generator_) < Ub * dt) {
-                auto [dx, dy] = GenerateMutationJump();
-                double new_x = X_[i][j] + dx;
-                double new_y = Y_[i][j] + dy;
-                int new_i = std::max(0, std::min(L - 1, (int)std::round(new_x)));
-                int new_j = std::max(0, std::min(L - 1, (int)std::round(new_y)));
+                auto it = strains_.find(p);
+                if (it == strains_.end()) continue;
 
-                // Проверяем границы
-                if (new_i >= 0 && new_i < L && new_j >= 0 && new_j < L) {
-                    Point new_p{ new_i, new_j };
-                    double mutated = mf * new_I;
-                    new_I -= mutated; // Уменьшаем родительскую популяцию
-                    strains_[new_p].i_fitness += mutated; // Добавляем мутанта
+                int64_t I_abs = it->second.I;
+                int64_t S_abs = it->second.R;
+
+                if (I_abs == 0 && S_abs == 0) continue;
+
+                // Переводим в double для вычислений
+                double I_frac = static_cast<double>(I_abs) / Ntot;
+                double S_frac = static_cast<double>(S_abs) / Ntot;
+
+                // Вычисляем Q (сумма по восприимчивым, взвешенная на K) и P (сумма по инфицированным)
+                double Q = 0.0, P = 0.0;
+                for (const auto& [point, strain] : strains_) {
+                    int m = point.x;
+                    int n = point.y;
+                    Q += static_cast<double>(strain.R) / Ntot * KFunc(i, j, m, n); // Q: влияние восприимчивых на заражение от (i,j)
+                    P += static_cast<double>(strain.I) / Ntot * KFunc(m, n, i, j); // P: влияние инфицированных на заражение (i,j)
+                }
+
+                double dI_dt = I_frac * (R0 * Q - 1.0);
+                double dS_dt = I_frac - R0 * S_frac * P;
+
+                double new_I_frac = I_frac + dt * dI_dt;
+                double new_S_frac = S_frac + dt * dS_dt;
+
+                // Предотвращаем отрицательные значения
+                new_I_frac = max(0.0, new_I_frac);
+                new_S_frac = max(0.0, new_S_frac);
+
+                // Переводим обратно в абсолютные числа
+                int64_t new_I_abs = llround(new_I_frac * Ntot);
+                int64_t new_S_abs = llround(new_S_frac * Ntot);
+
+                // Сохраняем детерминированные значения
+                new_strains[p] = { new_I_abs, new_S_abs };
+                if (new_I_abs <= 0) continue;
+
+                double mean_mut = Ub * new_I_abs;
+                if (mean_mut <= 0.0) continue;
+
+                // Генерируем пуассоновское число мутантов с оптимизацией
+                int64_t n_mut;
+                if (mean_mut > 10.0) n_mut = static_cast<int64_t>(std::round(mean_mut));
+                else if (mean_mut >= 0.01) {
+                    poisson_distribution<int64_t> poiss(mean_mut);
+                    n_mut = poiss(generator_);
+                }
+                else n_mut = 0;
+                if (n_mut == 0) continue;
+
+                // Распределяем мутантов по 4 соседним клеткам
+                const int dirs[4][2] = { {1,0}, {-1,0}, {0,1}, {0,-1} };
+                for (int m = 0; m < n_mut; ++m) {
+                    int dir = static_cast<int>(uniform_dist_(generator_) * 4); // случайное направление 0..3
+                    int ni = i + dirs[dir][0];
+                    int nj = j + dirs[dir][1];
+
+                    mutation_flow[p] -= 1; // Мутант покидает исходную клетку
+                    if (ni >= 0 && ni < L && nj >= 0 && nj < L) mutation_flow[{ni, nj}] += 1; // Мутант попадает в целевую клетку
+                    // иначе мутант теряется (за границей)
                 }
             }
-            new_I = max(new_I, 0.0);
-            new_S = max(new_S, 0.0);
-
-            // Обновляем значения
-            if (new_I > CONST::EPS || new_S > CONST::EPS) strain = { new_I, new_S };
         }
+
+        // Применяем мутационный поток к new_strains
+        for (const auto& [point, delta_abs] : mutation_flow) {
+            if (delta_abs == 0) continue;
+            new_strains[point].I += delta_abs;
+            if (new_strains[point].I < 0) new_strains[point].I = 0; // защита от отрицательных
+        }
+
+        // Обновляем глобальное состояние
+        strains_ = move(new_strains);
     }
 
     void CalculateStatistics(int step) {
-        double total_I = 0.0, total_S = 0.0;
+        double total_I = 0.0;
+        double total_R = 0.0;
 
         for (const auto& [point, strain] : strains_) {
-            total_I += strain.i_fitness;
-            total_S += strain.s_fitness;
+            total_I += strain.I;
+            total_R += strain.R;
         }
 
-        double total = total_I + total_S;
-        norm_[step] = total;
+        double total = total_I + total_R;
+        norm_[step] = total / params_.N_total; // нормированная полная численность
         finf_[step] = (total > 0) ? total_I / total : 0.0;
     }
 
     int CountInfectedCells() const {
         int count = 0;
         for (const auto& [point, strain] : strains_) {
-            if (strain.i_fitness > CONST::EPS) ++count;
+            if (strain.I > 0) ++count;
         }
         return count;
     }
 
     void SaveCurrentState(int step) {
         int L = params_.L;
-
-        // Создаем плотные матрицы
         vector<vector<double>> I_dense(L, vector<double>(L, 0.0));
-        vector<vector<double>> S_dense(L, vector<double>(L, 0.0));
+        vector<vector<double>> R_dense(L, vector<double>(L, 0.0));
 
         for (const auto& [point, strain] : strains_) {
             int i = point.x;
             int j = point.y;
             if (i >= 0 && i < L && j >= 0 && j < L) {
-                I_dense[i][j] = strain.i_fitness;
-                S_dense[i][j] = strain.s_fitness;
+                I_dense[i][j] = static_cast<double>(strain.I) / params_.N_total;
+                R_dense[i][j] = static_cast<double>(strain.R) / params_.N_total;
             }
         }
 
-        // Сохраняем
         string dir_path = CONST::OUTPUT_DIR_NAME + "/" + OUTPUT_NAME + "/" + CONST::DATA_DIR;
         filesystem::create_directories(dir_path);
 
         ofstream I_file(dir_path + "/state_I_step_" + to_string(step) + ".csv");
-        ofstream S_file(dir_path + "/state_S_step_" + to_string(step) + ".csv");
+        ofstream R_file(dir_path + "/state_R_step_" + to_string(step) + ".csv");
 
-        if (I_file.is_open() && S_file.is_open()) {
+        if (I_file.is_open() && R_file.is_open()) {
             for (int i = 0; i < L; ++i) {
                 for (int j = 0; j < L; ++j) {
-                    I_file << fixed << setprecision(6) << I_dense[i][j];
-                    S_file << fixed << setprecision(6) << S_dense[i][j];
+                    I_file << fixed << setprecision(16) << I_dense[i][j];
+                    R_file << fixed << setprecision(16) << R_dense[i][j];
                     if (j < L - 1) {
                         I_file << ";";
-                        S_file << ";";
+                        R_file << ";";
                     }
                 }
                 I_file << "\n";
-                S_file << "\n";
+                R_file << "\n";
             }
         }
     }
@@ -324,7 +342,6 @@ private:
     void SaveFinalResults() {
         string dir_path = CONST::OUTPUT_DIR_NAME + "/" + OUTPUT_NAME + "/" + CONST::DATA_DIR;
 
-        // Сохраняем временные ряды
         ofstream norm_file(dir_path + "/norm_time_series.csv");
         ofstream finf_file(dir_path + "/finf_time_series.csv");
 
@@ -338,7 +355,6 @@ private:
             }
         }
 
-        // Сохраняем параметры
         ofstream param_file(dir_path + "/parameters.txt");
         if (param_file.is_open()) {
             param_file << "MODEL PARAMETERS:\n";
@@ -349,10 +365,9 @@ private:
             param_file << "a: " << params_.a << "\n";
             param_file << "Varx: " << params_.Varx << "\n";
             param_file << "asym: " << params_.asym << "\n";
-            param_file << "beta: " << params_.beta << "\n";
-            param_file << "mutation_fraction: " << params_.mutation_fraction << "\n";
             param_file << "dt: " << params_.dt << "\n";
             param_file << "init_infected: " << params_.init_infected << "\n";
+            param_file << "N_total: " << params_.N_total << "\n";
         }
     }
 
@@ -365,28 +380,29 @@ private:
         cout << "  Cross-immunity distance (a): " << params_.a << "\n";
         cout << "  Coordinate variance (Varx): " << params_.Varx << "\n";
         cout << "  Asymmetry: " << params_.asym << "\n";
-        cout << "  Mutation distribution (beta): " << params_.beta << "\n";
-        cout << "  Initial infected: " << params_.init_infected << "\n";
+        cout << "  Time step (dt): " << params_.dt << "\n";
+        cout << "  Initial infected fraction: " << params_.init_infected << "\n";
+        cout << "  Total population size: " << params_.N_total << "\n";
     }
 
     void PrintFinalStatistics() {
         double total_I = 0.0;
-        double total_S = 0.0;
+        double total_R = 0.0;
         int infected_cells = 0;
         int susceptible_cells = 0;
 
         for (const auto& [point, strain] : strains_) {
-            total_I += strain.i_fitness;
-            total_S += strain.s_fitness;
+            total_I += strain.I;
+            total_R += strain.R;
 
-            if (strain.i_fitness > CONST::EPS) ++infected_cells;
-            if (strain.s_fitness > CONST::EPS) ++susceptible_cells;
+            if (strain.I > 0) ++infected_cells;
+            if (strain.R > 0) ++susceptible_cells;
         }
 
         cout << "\nFinal Statistics:\n";
-        cout << "  Total infected: " << total_I << "\n";
-        cout << "  Total susceptible: " << total_S << "\n";
-        cout << "  Total population: " << total_I + total_S << "\n";
+        cout << "  Total infected fraction: " << total_I / params_.N_total << "\n";
+        cout << "  Total susceptible fraction: " << total_R / params_.N_total << "\n";
+        cout << "  Total fraction: " << (total_I + total_R) / params_.N_total << "\n";
         cout << "  Infected cells: " << infected_cells << "\n";
         cout << "  Susceptible cells: " << susceptible_cells << "\n";
     }
@@ -405,28 +421,25 @@ void RunExperiment(const string& name) {
     cout << "========================================\n\n";
 
     ModelParameters params;
-    params.L = 30;
-    params.R0 = 2.6;
-    params.Ub = 0.5;
-    params.a = 7.0;
+    params.L = 40;
+    params.M = 2'000; // увеличено для достаточного времени развития волны
+    params.tshow = params.M / 50;
+    params.T0 = 0;
+    params.R0 = 2;
+    params.Ub = 1e-3;
+    params.a = 2.0;
     params.Varx = 0.1;
     params.asym = 1.0;
-    params.beta = 2;
-    params.mutation_fraction = 0.1;
-    params.init_infected = 0.01;
-    params.dt = 0.1;
-
-    params.M = 800;
-    params.tshow = 5;
-    params.T0 = 0;
-    params.R0 = 2.8;
+    params.dt = 1e-1;
+    params.init_infected = 0.1;
+    params.N_total = 1e8;
 
     OUTPUT_NAME = name;
-    RADIUS = 1.0;
+    RADIUS = 2.0;
 
     string data_dir = CONST::OUTPUT_DIR_NAME + "/" + OUTPUT_NAME;
-    InitDirectory(data_dir);
 
+    InitDirectory(data_dir);
     EpidemicSimulator simulator(params);
     simulator.Run();
 
@@ -439,6 +452,6 @@ void RunExperiment(const string& name) {
 }
 
 int main() {
-    RunExperiment("exp");
+    RunExperiment("test");
     return 0;
 }
