@@ -1,0 +1,256 @@
+clear; clc;
+%% Model parameters
+R0 = 1.8;                  % basic reproduction ratio
+Ub = 1e-3;                 % mutation rate
+a = 7;                     % immunity half-distance
+N = 1e8;                  % total population size
+%% Internal parameters
+L = 50;                    % number of variants for each coordinate
+Tmax = 200;               % max time (units of recovery time)
+dt = 0.5;               % time step
+M = round(Tmax / dt);   % number of time points
+SEED = 1;
+print_interval = 10;      % print progress every 100 steps
+init_infected = 1.0;            % Желаемая суммарная доля инфицированных
+alpha_asym = 0.5;          % Фактор асимметрии (а=[0.1, 0.5, 0.7] из RR2018)
+init_infected_sum = 1e-3;       % Желаемая суммарная доля инфицированных
+sigma_I = 1.0; % Узкая и компактная "голова" инфекции
+sigma_R = 5.0; % Широкий блок иммунитета позади
+%% Immunity kernel K (2D periodic distance)
+K = zeros(L, L);
+for dx = 0:L-1
+    for dy = 0:L-1
+        dx_per = min(dx, L - dx);
+        dy_per = min(dy, L - dy);
+        u = sqrt(dx_per^2 + alpha_asym * dy_per^2);
+        K(dx+1, dy+1) = 1 - exp(-u / a);
+    end
+end
+K_fft = fft2(K);
+% Initial conditions
+rng(SEED);
+%% CLOUD (Asymmetric & Elliptical Initial Conditions)
+init_recovered_sum = 1.0 - init_infected_sum; % Остальная масса уходит в иммунитет
+
+% Задаем центры для инфекции (I) и иммунитета (R)
+cx_I = round(L / 2) + 2; % Голова вируса правее центра
+cy_I = round(L / 2);
+cx_R = round(L / 2) - 3; % Стена иммунитета позади (левее) вируса
+cy_R = round(L / 2);
+
+% Создаем сетку координат 
+[X, Y] = meshgrid(1:L, 1:L);
+
+% Вычисляем расстояния с учетом периодических границ сетки (тор)
+dX_I = min(abs(X - cx_I), L - abs(X - cx_I));
+dY_I = min(abs(Y - cy_I), L - abs(Y - cy_I));
+
+dX_R = min(abs(X - cx_R), L - abs(X - cx_R));
+dY_R = min(abs(Y - cy_R), L - abs(Y - cy_R));
+
+% Параметры Гауссиан
+sigma_I = 1.0;       % Узкая круглая "голова" инфекции
+sigma_R_x = 4.0;     % Толщина иммунного барьера по оси X (по направлению движения)
+sigma_R_y = 20.0;    % Ширина барьера по оси Y (растягиваем в эллипс, чтобы перекрыть фланги)
+
+% Формируем распределения
+I_unnorm = exp(-(dX_I.^2 + dY_I.^2) / (2 * sigma_I^2));
+% Эллиптическая Гауссиана для иммунитета (разные сигмы по осям)
+R_unnorm = exp(-(dX_R.^2 / (2 * sigma_R_x^2) + dY_R.^2 / (2 * sigma_R_y^2)));
+
+% Нормируем матрицы, чтобы суммы совпадали с желаемыми
+I = (I_unnorm / sum(I_unnorm(:))) * init_infected_sum;
+R = (R_unnorm / sum(R_unnorm(:))) * init_recovered_sum;
+
+% Проверка сумм для вывода в консоль
+sumI = sum(I(:));
+sumR = sum(R(:));
+fprintf('Initialization: I = %.6e, R = %.6f, total = %.6f\n', sumI, sumR, sumI + sumR);
+%% Print parameters
+fprintf('Grid size: %d x %d (periodic boundaries)\n', L, L);
+fprintf('Time steps: %d\n', M);
+fprintf('R0 = %.1f\n', R0);
+fprintf('Ub = %g\n', Ub);
+fprintf('a = %d\n', a);
+fprintf('dt = %.1f\n', dt);
+fprintf('init_infected = %.2e\n', 1e-2);
+fprintf('N = %g\n', N);
+fprintf('Seed = %d\n\n', SEED);
+fprintf('%5s | %8s | %8s | %6s | %7s | %10s | %9s\n', 'Step', 'finf', 'frec', 'norm', 'wave_r', 'max_I', 'diversity');
+fprintf('%5s-|-%8s-|-%8s-|-%6s-|-%7s-|-%10s-|-%9s\n', repmat('-',1,5), repmat('-',1,8), repmat('-',1,8), repmat('-',1,6), repmat('-',1,7), repmat('-',1,10), repmat('-',1,9));
+%% Initalize observatives
+Inew = zeros(L, L);
+norm_ = zeros(1, M);
+finf_ = zeros(1, M);
+frec_ = zeros(1, M);
+mean_X_ = zeros(1, M);
+max_I_ = zeros(1, M);
+diversity_ = zeros(1, M);
+%% Snapshot settings
+% Вычисляем Qmat и Pmat для начального состояния (t=0)
+Qmat_init = real(ifft2(fft2(R) .* K_fft));
+Pmat_init = real(ifft2(fft2(I) .* K_fft));
+Qmat_init(Qmat_init < 0) = 0; 
+Pmat_init(Pmat_init < 0) = 0;
+
+n_snapshots = 4;
+snapshot_indices = round(linspace(1, M, n_snapshots));
+snapshots = cell(n_snapshots, 4); % Теперь 4 столбца: I, R, Qmat, Pmat
+snapshot_times = zeros(1, n_snapshots);
+
+% Сохраняем шаг t=0
+snapshots{1,1} = I;
+snapshots{1,2} = R;
+snapshots{1,3} = Qmat_init;
+snapshots{1,4} = Pmat_init;
+snapshot_times(1) = 0;
+snap_idx = 2;
+%% Main loop
+for k = 1:M
+    t = k * dt;
+    % Diagnostics at beginning of step
+    norm_(k) = sum(sum(I + R));
+    finf_(k) = sum(sum(I)) / norm_(k);
+    frec_(k) = sum(sum(R)) / norm_(k);
+    if sum(sum(I)) > 0
+        % mean column index (j) of infected, weighted by I
+        j_idx = 1:L;
+        mean_X_(k) = sum(sum(I .* j_idx)) / sum(sum(I));
+    else
+        mean_X_(k) = NaN;
+    end
+    
+    max_I_(k) = max(max(I));
+    diversity_(k) = sum(sum(I > 0));
+    
+    % Print progress
+    if mod(k, print_interval) == 0 || k == 1
+        fprintf('%5d | %8.6f | %8.6f | %6.2f | %7.3f | %10.2e | %9d\n', k, finf_(k), frec_(k), norm_(k), mean_X_(k), max_I_(k), diversity_(k));
+    end
+    
+    % Двумерный расчет P и Q, чтобы иммунитет работал по осям X и Y
+    Qmat = real(ifft2(fft2(R) .* K_fft));
+    Pmat = real(ifft2(fft2(I) .* K_fft));
+    % В MATLAB FFT может давать микроскопические отрицательные значения из-за погрешности
+    Qmat(Qmat < 0) = 0; 
+    Pmat(Pmat < 0) = 0;
+    % Update all strains
+    for i = 1:L
+        for j = 1:L
+            Q = Qmat(i, j);
+            P = Pmat(i, j);
+            
+            Inew(i,j) = I(i,j) * (1 + dt * (R0 * Q - 1));
+            R(i,j) = R(i,j) * (1 - dt * R0 * P) + dt * I(i,j);
+            
+            % ----- Random genetic drift (Используем вынесенную функцию) -----
+            Inew(i,j) = drift(Inew(i,j), N);
+    
+            % ----- Mutation with periodic boundaries -----
+            i_up   = mod(i-2, L) + 1;
+            i_down = mod(i,   L) + 1;
+            j_left = mod(j-2, L) + 1;
+            j_right= mod(j,   L) + 1;
+            
+            in = dt * Ub * (I(i_up, j) + I(i_down, j) + I(i, j_left) + I(i, j_right));
+            out= dt * Ub * 4 * I(i, j);
+            
+            % Drift for incoming mutations (Используем вынесенную функцию)
+            in = drift(in, N);
+            
+            Inew(i,j) = Inew(i,j) + in - out;
+        end
+    end
+    
+    % Cutoff: keep only strains with at least one individual
+    Inew = Inew .* ( (Inew * N) >= 1 );
+    I = Inew;
+    
+    % Store snapshot if needed
+    if snap_idx <= n_snapshots && k == snapshot_indices(snap_idx)
+        snapshots{snap_idx,1} = I;
+        snapshots{snap_idx,2} = R;
+        snapshots{snap_idx,3} = Pmat;
+        snapshots{snap_idx,4} = Qmat;
+        snapshot_times(snap_idx) = t;
+        snap_idx = snap_idx + 1;
+    end
+end
+
+%% Create output folder
+if ~exist('output', 'dir')
+    mkdir('output');
+end
+
+%% Figure 1: Evolution snapshots
+% Делаем окно выше, чтобы поместились 4 ряда графиков
+figure('Position', [100 100 1600 1000]); 
+
+for t_idx = 1:n_snapshots
+    % 1-й ряд: Infected (I)
+    subplot(4, n_snapshots, t_idx);
+    imagesc(snapshots{t_idx,1});
+    colorbar;
+    title(sprintf('Infected t=%.2f', snapshot_times(t_idx)));
+    xlabel('Y'); ylabel('X');
+    axis xy equal tight;
+    
+    % 2-й ряд: Recovered (R)
+    subplot(4, n_snapshots, t_idx + n_snapshots);
+    imagesc(snapshots{t_idx,2});
+    colorbar;
+    title(sprintf('Recovered t=%.2f', snapshot_times(t_idx)));
+    xlabel('Y'); ylabel('X');
+    axis xy equal tight;
+    
+    % 3-й ряд: Immunity Landscape (Pmat)
+    subplot(4, n_snapshots, t_idx + 2*n_snapshots);
+    imagesc(snapshots{t_idx,3});
+    colorbar;
+    title(sprintf('Pmat t=%.2f', snapshot_times(t_idx)));
+    xlabel('Y'); ylabel('X');
+    axis xy equal tight;
+    
+    % 4-й ряд: Infection Pressure (Qmat)
+    subplot(4, n_snapshots, t_idx + 3*n_snapshots);
+    imagesc(snapshots{t_idx,4});
+    colorbar;
+    title(sprintf('Qmat t=%.2f', snapshot_times(t_idx)));
+    xlabel('Y'); ylabel('X');
+    axis xy equal tight;
+end
+title_str = sprintf('Evolution Parameters:\nR_0=%.1f, U_b=%g, a=%g, N=%g, L=%d, dt=%g, M=%d, SEED=%d, \\alpha_{asym}=%.2f', R0, Ub, a, N, L, dt, M, SEED, alpha_asym);
+sgtitle(title_str, 'Interpreter', 'tex', 'FontSize', 14);
+saveas(gcf, fullfile('output', 'evolution_snapshots.png'));
+%% Figure 2: Diagnostic plots
+figure('Position', [50 50 1200 400]);
+
+subplot(1,3,1);
+plot((1:M)*dt, finf_, 'r-', 'LineWidth', 2);
+hold on;
+%plot((1:M)*dt, frec_, 'b-', 'LineWidth', 2); 
+xlabel('Time'); ylabel('Fraction'); legend('Infected');
+title('Population fractions');
+
+subplot(1,3,2);
+plot((1:M)*dt, norm_, 'k-', 'LineWidth', 2);
+xlabel('Time'); ylabel('Total norm'); title('Conservation check (~1)');
+
+subplot(1,3,3);
+plot((1:M)*dt, mean_X_, 'g-', 'LineWidth', 2);
+xlabel('Time'); ylabel('Mean column index'); title('Wave position (periodic)');
+
+% Формируем красивый заголовок в две строки
+title_str_diag = sprintf('Diagnostics (periodic):\nR_0=%.1f, U_b=%g, a=%g, N=%g, L=%d, dt=%g, M=%d, SEED=%d, \\alpha_{asym}=%.2f', R0, Ub, a, N, L, dt, M, SEED, alpha_asym);
+sgtitle(title_str_diag, 'Interpreter', 'tex', 'FontSize', 14);
+saveas(gcf, fullfile('output', 'diagnostics.png'));
+%% Локальная функция для метода "Broken stick"
+function new_val = drift(val, N)
+    exp_num = val * N;
+    if exp_num <= 10
+        xm = round(6*exp_num);
+        new_val = sum(xm*rand(1,xm) < exp_num) / N;
+    else
+        new_val = val;
+    end
+end
