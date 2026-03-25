@@ -22,37 +22,37 @@ namespace CONST {
 
 std::string NAME = "test";
 
-// ================== Параметры модели ==================
+// ================== Model Parameters ==================
 struct ModelParams {
-    int seed = 42;              // Seed for rng
-    int L = 25;                 // размер сетки L x L
-    int M = 2000;               // число шагов по времени
-    int tshow = M / 50;         // интервал сохранения состояний
-    int T0 = 0;                 // первый шаг сохранения
-    double R0 = 2.5;            // базовое репродуктивное число
-    double Ub = 1e-3;           // частота мутаций
-    double a = 7.0;             // масштаб кросс-иммунитета
-    double dt = 0.5;            // шаг по времени
-    double init_infected = 1e-3; // начальная доля инфицированных
-    int64_t N = 1e8;            // общая численность популяции
+    int seed = 42;               // Seed for rng
+    int L = 25;                  // Grid size L x L
+    int M = 2000;                // Number of time steps
+    int tshow = M / 50;          // State saving interval
+    int T0 = 0;                  // First step to save
+    double R0 = 2.5;             // Basic reproduction number
+    double Ub = 1e-3;            // Mutation rate
+    double a = 7.0;              // Cross-immunity scale
+    double dt = 0.5;             // Time step
+    double init_infected = 1e-3; // Initial fraction of infected
+    int64_t N = 1e8;             // Total population size
 };
 
-// ================== Основной класс симуляции ==================
+// ================== Main Simulation Class ==================
 class EpidemicSimulator {
 private:
     ModelParams p_;
     mt19937 rng_;
     uniform_real_distribution<double> uniform_{ 0.0, 1.0 };
 
-    // Состояния (доли от общей популяции)
-    std::vector<std::vector<double>> I_;   // инфицированные
-    std::vector<std::vector<double>> R_;   // восприимчивые (переболевшие)
+    // States (fractions of the total population)
+    std::vector<std::vector<double>> I_;   // Infected
+    std::vector<std::vector<double>> R_;   // Recovered/Susceptible
 
-    // Временные ряды
-    std::vector<double> norm_;   // сумма I+R (должна быть 1)
-    std::vector<double> finf_;   // доля инфицированных среди всего населения
+    // Time series
+    std::vector<double> norm_;   // Sum of I+R (should be ~1.0)
+    std::vector<double> finf_;   // Fraction of infected in total population
 
-    // Предвычисленное одномерное ядро Kx[dx] = 1 - exp(-dx / a)
+    // Precomputed 1D kernel Kx[dx] = 1 - exp(-dx / a)
     std::vector<double> K2D_;
 
 public:
@@ -82,7 +82,7 @@ public:
     }
 
 private:
-    // Предвычисление одномерного ядра K(dx) = 1 - exp(-dx / a)
+    // Precompute 1D kernel K(dx) = 1 - exp(-dx / a)
     void PrecomputeKernel() {
         K2D_.resize(p_.L);
         for (int dx = 0; dx < p_.L; ++dx) {
@@ -91,7 +91,7 @@ private:
         }
     }
 
-    // Инициализация
+    // Initialization
     void InitializeState() {
         int L = p_.L;
         I_.assign(L, std::vector<double>(L, 0.0));
@@ -100,30 +100,31 @@ private:
         int x0 = 15;
         double infected_total = p_.init_infected;
 
-        // Количество клеток слева от x0 (включая все y)
+        // Number of cells to the left of x0 (including all y)
         int left_cells = x0 * L;
-        // Заполнение
+        
+        // Fill the grid
         for (int y = 0; y < L; ++y) {
             for (int x = 0; x < L; ++x) {
                 if (x == x0) {
-                    // Заражённый столбец: только инфицированные
+                    // Infected column: only infected individuals
                     I_[x][y] = infected_total / L;
                     R_[x][y] = 0.0;
                 }
                 else if (x < x0) {
-                    // Слева: только восприимчивые ("выздоровевшие")
+                    // Left side: only susceptible ("recovered" in context of cross-immunity)
                     I_[x][y] = 0.0;
                     R_[x][y] = (1.0 - infected_total) / left_cells;
                 }
                 else { // x > x0
-                    // Справа: пусто
+                    // Right side: empty
                     I_[x][y] = 0.0;
                     R_[x][y] = 0.0;
                 }
             }
         }
 
-        // Контрольная сумма
+        // Checksum
         double sumI = 0.0, sumR = 0.0;
         for (int y = 0; y < L; ++y)
             for (int x = 0; x < L; ++x) {
@@ -133,7 +134,7 @@ private:
         std::cout << "Initialization: sumI = " << sumI << ", sumR = " << sumR << ", total = " << sumI + sumR << "\n";
     }
 
-    // Один шаг по времени
+    // Single time step
     void Step() {
         int L = p_.L;
         double dt = p_.dt;
@@ -141,11 +142,11 @@ private:
         double Ub = p_.Ub;
         int64_t Ntot = p_.N;
 
-        // - Вычисление Q и P (одномерные свёртки) -
+        // - Calculate Q and P (1D convolutions) -
         std::vector<double> Qx(L, 0.0);
         std::vector<double> Px(L, 0.0);
 
-        // 1. Аналог sum(R, 1) и sum(I, 1) из MATLAB (сумма по строкам/y)
+        // 1. Analog of sum(R, 1) and sum(I, 1) from MATLAB (summing over rows/y)
         std::vector<double> R_sum(L, 0.0);
         std::vector<double> I_sum(L, 0.0);
         for (int x = 0; x < L; ++x) {
@@ -155,7 +156,7 @@ private:
             }
         }
 
-        // 2. Сама свёртка с ядром
+        // 2. Kernel convolution
         for (int j = 0; j < L; ++j) {
             for (int k = 0; k < L; ++k) {
                 int dx = abs(j - k);
@@ -165,9 +166,10 @@ private:
             }
         }
 
-        // - Предварительное обновление I (без мутаций) -
+        // - Preliminary update for I (without mutations) -
         std::vector<std::vector<double>> I_new(L, std::vector<double>(L, 0.0));
-        // - Мутации (диффузия по 4 соседям) -
+        
+        // - Mutations (diffusion over 4 neighbors) -
         for (int x = 0; x < L; ++x) {
             for (int y = 0; y < L; ++y) {
                 R_[x][y] = R_[x][y] * (1.0 - dt * R0 * Px[x]) + dt * I_[x][y];
@@ -175,7 +177,7 @@ private:
                 double newI = I_[x][y] * (1.0 + dt * (R0 * Qx[x] - 1.0));
                 I_new[x][y] = GetStochasticCorrection(newI);
 
-                // Сумма инфекции у соседей
+                // Infection sum from neighbors
                 int y_up = (y - 1 + L) % L;
                 int y_down = (y + 1) % L;
                 int x_left = (x - 1 + L) % L;
@@ -208,7 +210,7 @@ private:
         return static_cast<double>(count) / N;
     }
 
-    // Вычисление статистик за шаг
+    // Calculate statistics for the current step
     void CalculateStatistics(int step) {
         double sumI = 0.0, sumR = 0.0;
         for (int y = 0; y < p_.L; ++y)
@@ -221,7 +223,7 @@ private:
         finf_[step] = (total > 0.0) ? sumI / total : 0.0;
     }
 
-    // Сохранение текущего состояния (матриц I и R)
+    // Save current state (I and R matrices)
     void SaveState(int step) {
         const std::string& output_dir = CONST::OUTPUT + "/" + NAME;
         const std::string& data_dir = output_dir + "/" + CONST::DATA;
@@ -237,31 +239,31 @@ private:
                 }
                 fout << "\n";
             }
-            };
+        };
 
         save_matrix(I_, "I_step_" + to_string(step) + ".csv");
         save_matrix(R_, "R_step_" + to_string(step) + ".csv");
     }
 
-    // Сохранение временных рядов и параметров
+    // Save time series and parameters
     void SaveFinalResults() {
         const std::string& output_dir = CONST::OUTPUT + "/" + NAME;
         const std::string& data_dir = output_dir + "/" + CONST::DATA;
         fs::create_directories(data_dir);
 
-        // Норма
+        // Norm file
         std::ofstream norm_file(data_dir + "/norm.csv");
         norm_file << "step;norm\n";
         for (int i = 0; i < p_.M; ++i)
             norm_file << i << ";" << norm_[i] << "\n";
 
-        // Доля инфицированных
+        // Infection fraction file
         std::ofstream finf_file(data_dir + "/finf.csv");
         finf_file << "step;finf\n";
         for (int i = 0; i < p_.M; ++i)
             finf_file << i << ";" << finf_[i] << "\n";
 
-        // Параметры
+        // Parameters file
         std::ofstream param_file(data_dir + "/parameters.txt");
         param_file << "L = " << p_.L << "\n";
         param_file << "M = " << p_.M << "\n";
@@ -276,9 +278,10 @@ private:
         param_file << "Seed = " << p_.seed << "\n\n";
     }
 
-    // Вывод прогресса
+    // Progress output
     void PrintProgress(int step) {
-        std::cout << "Step " << step << "/" << p_.M << " (" << (100 * step / p_.M) << "%)" << " | norm = " << norm_[step] << ", finf = " << finf_[step] << "\n";
+        std::cout << "Step " << step << "/" << p_.M << " (" << (100 * step / p_.M) << "%)" 
+                  << " | norm = " << norm_[step] << ", finf = " << finf_[step] << "\n";
     }
 
     void PrintParameters() {
@@ -319,10 +322,10 @@ void TEST(const ModelParams& params, const std::string& name) {
     system(cmd.c_str());
 }
 
-// ================== Точка входа ==================
+// ================== Entry Point ==================
 int main() {
     ModelParams params;
-    // Можно переопределить параметры при необходимости
+    // Parameters can be overridden here
     params.L = 50;
     params.M = 500;
     params.tshow = params.M / 50;
@@ -335,8 +338,6 @@ int main() {
     params.N = 1e8;
     params.seed = 12;
 
-    TEST(params, "test_short");
-    params.M = 5000;
-    TEST(params, "test_long");
+    TEST(params, "test");
     return 0;
 }
