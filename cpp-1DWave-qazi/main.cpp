@@ -140,7 +140,6 @@ private:
         double dt = p_.dt;
         double R0 = p_.R0;
         double Ub = p_.Ub;
-        int64_t Ntot = p_.N;
 
         // - Calculate Q and P (1D convolutions) -
         std::vector<double> Qx(L, 0.0);
