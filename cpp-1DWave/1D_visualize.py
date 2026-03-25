@@ -5,7 +5,7 @@ import os
 # Model parameters
 dt = 0.5
 Tmax = 2000.0
-L = 100
+L = 160
 R0 = 1.8
 Ub = 1e-3
 a = 7.0
