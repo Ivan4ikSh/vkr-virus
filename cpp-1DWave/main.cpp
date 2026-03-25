@@ -7,24 +7,36 @@
 #include <string>
 #include <filesystem>
 
+struct Params {
+    double R0;
+    double Ub;
+    double a;
+    int L;
+    double N;
+    double Tmax;
+    double T0;
+    double Txy;
+    double dt;
+    unsigned seed;
+};
+
 namespace fs = std::filesystem;
 const std::string OUTPUT_DIR = "out";
 
 // --- Helper Functions ---
-double GetStochasticCorrection(const double& lambda, const double& N, std::mt19937& gen) {
-    if (lambda >= 10.0) return lambda;
+double GetStochasticCorrection(const double& val, const double& N, std::mt19937& gen) {
+    const double& lambda = val * N;
+    if (lambda >= 10.0) return val;
+
     double new_val = 0.0;
     int xm = static_cast<int>(round(6.0 * lambda));
-    if (xm > 0) {
-        double prob = lambda / xm;
-        std::uniform_real_distribution<double> dist(0.0, 1.0);
-        int count = 0;
-        for (int n = 0; n < xm; ++n) {
-            if (dist(gen) < prob) ++count;
-        }
-        new_val = static_cast<double>(count) / N;
+    std::uniform_real_distribution<double> dist(0.0, 1.0);
+    int count = 0;
+    for (int n = 0; n < xm; ++n) {
+        if (xm*dist(gen) < lambda) ++count;
     }
-    return new_val;
+
+    return static_cast<double>(count) / N;
 }
 
 std::vector<double> PrecomputeKernel(const int& L, const double& a) {
@@ -40,9 +52,17 @@ void SaveToFile(const std::string& filename, const std::vector<double>& data) {
     for (double v : data) f << v << "\n";
 }
 
-void WaveSimulation(const double& R0, const double& Ub, const double& a, const int& L,
-    const double& N, const double& Tmax, const double& T0,
-    const double& Txy, const double& dt, const unsigned& seed = 42) {
+void WaveSimulation(const Params& params) {
+    double R0 = params.R0;
+    double Ub = params.Ub;
+    double a = params.a;
+    int L = params.L;
+    double N = params.N;
+    double Tmax = params.Tmax;
+    double T0 = params.T0;
+    double Txy = params.Txy;
+    double dt = params.dt;
+    unsigned seed = params.seed;
 
     fs::create_directories(OUTPUT_DIR);
     const int& M = static_cast<int>(round(Tmax / dt));
@@ -98,14 +118,14 @@ void WaveSimulation(const double& R0, const double& Ub, const double& a, const i
 
             // Dynamics and Stochasticity
             const double& newI = I_old[j] * (1.0 + dt * (R0 * Qj - 1.0));
-            Inew[j] = GetStochasticCorrection(newI * N, N, gen);
+            Inew[j] = GetStochasticCorrection(newI, N, gen);
             Rnew[j] = R_old[j] * (1.0 - dt * R0 * Pj) + dt * I_old[j];
 
             // Mutations
             if (j > 0 && j < L - 1) {
                 const double& in = dt * Ub * (I_old[j + 1] + I_old[j - 1]);
                 const double& out = dt * Ub * 2.0 * I_old[j];
-                Inew[j] += GetStochasticCorrection(in * N, N, gen) - out;
+                Inew[j] += GetStochasticCorrection(in, N, gen) - out;
             }
         }
 
@@ -135,12 +155,26 @@ void WaveSimulation(const double& R0, const double& Ub, const double& a, const i
 
     // Post-processing & Final Results
     const auto& I_final = *I_cur;
+    const auto& R_final = *R_cur;
     const double& sumI = std::accumulate(I_final.begin(), I_final.end(), 0.0);
+    const double& sumR = std::accumulate(R_final.begin(), R_final.end(), 0.0);
     double meanI = 0.0;
-    for (int j = 0; j < L; ++j) meanI += I_final[j] * (j + 1);
+    double meanR = 0.0;
+    for (int j = 0; j < L; ++j) {
+        meanI += I_final[j] * (j + 1);
+        meanR += R_final[j] * (j + 1);
+    }
     meanI /= sumI;
+    meanR /= sumR;
 
     const double& speed = (meanI - meanI0) / (Tmax - T0);
+    double sdI = 0.0, sdR = 0.0;
+    for (int j = 0; j < L; ++j) {
+        sdI += I_final[j] * ((j + 1) - meanI) * ((j + 1) - meanI);
+        sdR += R_final[j] * ((j + 1) - meanR) * ((j + 1) - meanR);
+    }
+    sdI = sqrt(sdI / sumI);
+    sdR = sqrt(sdR / sumR);
 
     // Save everything
     SaveToFile("norm.txt", norm);
@@ -150,13 +184,37 @@ void WaveSimulation(const double& R0, const double& Ub, const double& a, const i
 
     for (size_t idx = 0; idx < I_slices.size(); ++idx) {
         SaveToFile("I_slice_" + std::to_string(idx) + ".txt", I_slices[idx]);
+        SaveToFile("R_slice_" + std::to_string(idx) + ".txt", R_slices[idx]);
     }
+
+    std::ofstream f_obs(OUTPUT_DIR + "/observables.txt");
+    f_obs << "speed=" << speed << "\n";
+    f_obs << "sdI=" << sdI << "\n";
+    f_obs << "sdR=" << sdR << "\n";
+    f_obs << "finf=" << finf.back() << "\n";
+    std::cout << "speed=" << speed << "\n";
+    std::cout << "sdI=" << sdI << "\n";
+    std::cout << "sdR=" << sdR << "\n";
+    std::cout << "finf=" << finf.back() << "\n";
+    f_obs.close();
 
     std::cout << "\nSimulation Complete. Speed: " << speed << "\n";
 }
 
 int main() {
-    WaveSimulation(1.8, 1e-3, 7.0, 100, 1e8, 2000.0, 500.0, 500.0, 0.5);
+    Params params;
+    params.R0 = 1.8;
+    params.Ub = 1e-3;
+    params.a = 7.0;
+    params.L = 160;
+    params.N = 1e8;
+    params.Tmax = 2000;
+    params.T0 = 500;
+    params.Txy = 500;
+    params.dt = 0.5;
+    params.seed = 42;
+
+    WaveSimulation(params);
 
     if (std::system("python 1D_visualize.py") != 0) {
         std::cerr << "Visualizer failed to start.\n";
