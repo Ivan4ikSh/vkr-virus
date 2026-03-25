@@ -98,14 +98,14 @@ void WaveSimulation(const double& R0, const double& Ub, const double& a, const i
 
             // Dynamics and Stochasticity
             const double& newI = I_old[j] * (1.0 + dt * (R0 * Qj - 1.0));
-            Inew[j] = GetStochasticCorrection(newI * N, N, gen) / N;
+            Inew[j] = GetStochasticCorrection(newI * N, N, gen);
             Rnew[j] = R_old[j] * (1.0 - dt * R0 * Pj) + dt * I_old[j];
 
             // Mutations
             if (j > 0 && j < L - 1) {
                 const double& in = dt * Ub * (I_old[j + 1] + I_old[j - 1]);
                 const double& out = dt * Ub * 2.0 * I_old[j];
-                Inew[j] += (GetStochasticCorrection(in * N, N, gen) / N) - out;
+                Inew[j] += GetStochasticCorrection(in * N, N, gen) - out;
             }
         }
 
