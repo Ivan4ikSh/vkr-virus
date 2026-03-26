@@ -22,7 +22,6 @@ class VirusWaveVisualizer2D:
 
         self.find_data_files()
         
-        # Читаем параметры как готовую строку для заголовка
         self.params_title_str = self.load_model_parameters_string()
 
         # Colormap for composite image ("comet")
@@ -51,7 +50,6 @@ class VirusWaveVisualizer2D:
         return np.loadtxt(filename, delimiter=';')
 
     def load_model_parameters_string(self):
-        """Просто читаем файл parameters.txt целиком для использования в заголовках"""
         param_file = os.path.join(self.data_dir, "parameters.txt")
         if os.path.exists(param_file):
             with open(param_file, 'r') as f:
@@ -83,7 +81,6 @@ class VirusWaveVisualizer2D:
         ax.set_xlabel('Time', fontsize=11)
         ax.set_ylabel('Fraction infected (finf)', fontsize=11)
     
-        # Добавляем параметры в заголовок
         full_title = f"Fraction infected over time\n\n{self.params_title_str}\n\nObservables: {obs_str}"
         ax.set_title(full_title, fontsize=11, pad=10)
     
@@ -138,7 +135,6 @@ class VirusWaveVisualizer2D:
             ax_R.tick_params(labelsize=7)
             plt.colorbar(im_R, ax=ax_R, fraction=0.046, pad=0.04)
 
-        # Выводим параметры в общий заголовок над всеми графиками
         plt.suptitle(f'Wave evolution\n\n{self.params_title_str}', fontsize=12, fontweight='bold', y=1.05)
         
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
@@ -155,7 +151,6 @@ class VirusWaveVisualizer2D:
             
         total_frames = min(max_frames, len(self.I_files))
         
-        # 1. Чуть увеличиваем высоту (с 6 до 7.5), чтобы вместить многострочный текст
         fig = plt.figure(figsize=(18, 6))
         gs = gridspec.GridSpec(1, 3, width_ratios=[0.1, 0.1, 0.1])
         
@@ -190,11 +185,9 @@ class VirusWaveVisualizer2D:
         
         images = [im1, im2, im3]
 
-        # Инициализируем стартовый заголовок ДО вызова tight_layout
         step_num_0 = self.extract_step_number(self.I_files[0])
         fig.suptitle(f'Virus wave evolution - Step: {step_num_0}\n\n{self.params_title_str}', fontsize=14, fontweight='bold')
         
-        # 2. Оставляем верхние 15% высоты фигуры (от 0.85 до 1.0) пустыми для заголовка
         plt.tight_layout(rect=[0, 0, 1, 0.98])
         
         def update(frame):
@@ -211,12 +204,10 @@ class VirusWaveVisualizer2D:
             
             step_num = self.extract_step_number(self.I_files[frame])            
             
-            # 3. Убрали y=1.05, теперь текст встанет ровно в зарезервированное место
             fig.suptitle(f'Virus wave evolution - Step: {step_num}\n\n{self.params_title_str}', fontsize=14, fontweight='bold')
             
             return images
         
-        # blit=False лучше работает, когда динамически меняется текст за пределами осей (suptitle)
         anim = FuncAnimation(fig, update, frames=total_frames, interval=300, blit=False, repeat=True)
         
         print(f"Creating animation with {total_frames} frames...")
