@@ -8,6 +8,7 @@
 #include <random>
 #include <string>
 #include <vector>
+#include <fftw3.h> // Не забудьте линковать с -lfftw3
 
 using namespace std;
 namespace fs = filesystem;
@@ -55,12 +56,24 @@ private:
     // Precomputed 1D kernel Kx[dx] = 1 - exp(-dx / a)
     std::vector<double> K2D_;
 
+    // FFTW variables
+    fftw_complex* fft_in_;
+    fftw_complex* fft_out_;
+    fftw_complex* fft_kernel_;
+    fftw_plan plan_inv_;
+    fftw_plan plan_fwd_;
+
 public:
     EpidemicSimulator(const ModelParams& params, int seed = 42) : p_(params), rng_(seed) {
         PrecomputeKernel();
+        InitFFT();
         InitializeState();
         norm_.resize(p_.M, 0.0);
         finf_.resize(p_.M, 0.0);
+    }
+
+    ~EpidemicSimulator() {
+        CleanFFT(); // Освобождаем память FFTW
     }
 
     void Run() {
@@ -86,9 +99,42 @@ private:
     void PrecomputeKernel() {
         K2D_.resize(p_.L);
         for (int dx = 0; dx < p_.L; ++dx) {
-            int d = std::min(dx, p_.L - dx);    
+            int d = std::min(dx, p_.L - dx); // periodic distance
             K2D_[dx] = 1.0 - exp(-static_cast<double>(d) / p_.a);
         }
+    }
+
+    void InitFFT() {
+        int L = p_.L;
+
+        // Выделение памяти под одномерные массивы для FFT
+        fft_in_ = fftw_alloc_complex(L);
+        fft_out_ = fftw_alloc_complex(L);
+        fft_kernel_ = fftw_alloc_complex(L);
+
+        // Планы для 1D преобразования
+        plan_fwd_ = fftw_plan_dft_1d(L, fft_in_, fft_out_, FFTW_FORWARD, FFTW_MEASURE);
+        plan_inv_ = fftw_plan_dft_1d(L, fft_in_, fft_out_, FFTW_BACKWARD, FFTW_MEASURE);
+
+        // Инициализируем и преобразуем 1D ядро K2D_
+        for (int x = 0; x < L; ++x) {
+            fft_in_[x][0] = K2D_[x];
+            fft_in_[x][1] = 0.0;
+        }
+        fftw_execute(plan_fwd_);
+
+        for (int i = 0; i < L; ++i) {
+            fft_kernel_[i][0] = fft_out_[i][0];
+            fft_kernel_[i][1] = fft_out_[i][1];
+        }
+    }
+
+    void CleanFFT() {
+        fftw_destroy_plan(plan_fwd_);
+        fftw_destroy_plan(plan_inv_);
+        fftw_free(fft_in_);
+        fftw_free(fft_out_);
+        fftw_free(fft_kernel_);
     }
 
     // Initialization
@@ -99,32 +145,25 @@ private:
 
         int x0 = 15;
         double infected_total = p_.init_infected;
-
-        // Number of cells to the left of x0 (including all y)
         int left_cells = x0 * L;
-        
-        // Fill the grid
+
         for (int y = 0; y < L; ++y) {
             for (int x = 0; x < L; ++x) {
                 if (x == x0) {
-                    // Infected column: only infected individuals
                     I_[x][y] = infected_total / L;
                     R_[x][y] = 0.0;
                 }
                 else if (x < x0) {
-                    // Left side: only susceptible ("recovered" in context of cross-immunity)
                     I_[x][y] = 0.0;
                     R_[x][y] = (1.0 - infected_total) / left_cells;
                 }
-                else { // x > x0
-                    // Right side: empty
+                else {
                     I_[x][y] = 0.0;
                     R_[x][y] = 0.0;
                 }
             }
         }
 
-        // Checksum
         double sumI = 0.0, sumR = 0.0;
         for (int y = 0; y < L; ++y)
             for (int x = 0; x < L; ++x) {
@@ -141,11 +180,10 @@ private:
         double R0 = p_.R0;
         double Ub = p_.Ub;
 
-        // - Calculate Q and P (1D convolutions) -
         std::vector<double> Qx(L, 0.0);
         std::vector<double> Px(L, 0.0);
 
-        // 1. Analog of sum(R, 1) and sum(I, 1) from MATLAB (summing over rows/y)
+        // 1. Analog of sum(R, 1) and sum(I, 1)
         std::vector<double> R_sum(L, 0.0);
         std::vector<double> I_sum(L, 0.0);
         for (int x = 0; x < L; ++x) {
@@ -155,20 +193,47 @@ private:
             }
         }
 
-        // 2. Kernel convolution
-        for (int j = 0; j < L; ++j) {
-            for (int k = 0; k < L; ++k) {
-                int dx = abs(j - k);
-                double K = K2D_[dx];
-                Qx[j] += K * R_sum[k];
-                Px[j] += K * I_sum[k];
-            }
+        // 2. FFT Convolution for R_sum -> Qx
+        for (int x = 0; x < L; ++x) {
+            fft_in_[x][0] = R_sum[x];
+            fft_in_[x][1] = 0.0;
+        }
+        fftw_execute(plan_fwd_);
+
+        for (int i = 0; i < L; ++i) {
+            double r1 = fft_out_[i][0], i1 = fft_out_[i][1];
+            double r2 = fft_kernel_[i][0], i2 = fft_kernel_[i][1];
+            fft_in_[i][0] = r1 * r2 - i1 * i2;
+            fft_in_[i][1] = r1 * i2 + i1 * r2;
+        }
+        fftw_execute(plan_inv_);
+
+        for (int x = 0; x < L; ++x) {
+            Qx[x] = fft_out_[x][0] / L; // Нормализация FFT
         }
 
-        // - Preliminary update for I (without mutations) -
+        // 3. FFT Convolution for I_sum -> Px
+        for (int x = 0; x < L; ++x) {
+            fft_in_[x][0] = I_sum[x];
+            fft_in_[x][1] = 0.0;
+        }
+        fftw_execute(plan_fwd_);
+
+        for (int i = 0; i < L; ++i) {
+            double r1 = fft_out_[i][0], i1 = fft_out_[i][1];
+            double r2 = fft_kernel_[i][0], i2 = fft_kernel_[i][1];
+            fft_in_[i][0] = r1 * r2 - i1 * i2;
+            fft_in_[i][1] = r1 * i2 + i1 * r2;
+        }
+        fftw_execute(plan_inv_);
+
+        for (int x = 0; x < L; ++x) {
+            Px[x] = fft_out_[x][0] / L; // Нормализация FFT
+        }
+
+        // - Updates and Mutations -
         std::vector<std::vector<double>> I_new(L, std::vector<double>(L, 0.0));
-        
-        // - Mutations (diffusion over 4 neighbors) -
+
         for (int x = 0; x < L; ++x) {
             for (int y = 0; y < L; ++y) {
                 R_[x][y] = R_[x][y] * (1.0 - dt * R0 * Px[x]) + dt * I_[x][y];
@@ -176,7 +241,6 @@ private:
                 double newI = I_[x][y] * (1.0 + dt * (R0 * Qx[x] - 1.0));
                 I_new[x][y] = GetStochasticCorrection(newI);
 
-                // Infection sum from neighbors
                 int y_up = (y - 1 + L) % L;
                 int y_down = (y + 1) % L;
                 int x_left = (x - 1 + L) % L;
@@ -209,7 +273,6 @@ private:
         return static_cast<double>(count) / N;
     }
 
-    // Calculate statistics for the current step
     void CalculateStatistics(int step) {
         double sumI = 0.0, sumR = 0.0;
         for (int y = 0; y < p_.L; ++y)
@@ -222,7 +285,6 @@ private:
         finf_[step] = (total > 0.0) ? sumI / total : 0.0;
     }
 
-    // Save current state (I and R matrices)
     void SaveState(int step) {
         const std::string& output_dir = CONST::OUTPUT + "/" + NAME;
         const std::string& data_dir = output_dir + "/" + CONST::DATA;
@@ -238,49 +300,37 @@ private:
                 }
                 fout << "\n";
             }
-        };
+            };
 
         save_matrix(I_, "I_step_" + to_string(step) + ".csv");
         save_matrix(R_, "R_step_" + to_string(step) + ".csv");
     }
 
-    // Save time series and parameters
     void SaveFinalResults() {
         const std::string& output_dir = CONST::OUTPUT + "/" + NAME;
         const std::string& data_dir = output_dir + "/" + CONST::DATA;
         fs::create_directories(data_dir);
 
-        // Norm file
         std::ofstream norm_file(data_dir + "/norm.csv");
         norm_file << "step;norm\n";
-        for (int i = 0; i < p_.M; ++i)
-            norm_file << i << ";" << norm_[i] << "\n";
+        for (int i = 0; i < p_.M; ++i) norm_file << i << ";" << norm_[i] << "\n";
 
-        // Infection fraction file
         std::ofstream finf_file(data_dir + "/finf.csv");
         finf_file << "step;finf\n";
-        for (int i = 0; i < p_.M; ++i)
-            finf_file << i << ";" << finf_[i] << "\n";
+        for (int i = 0; i < p_.M; ++i) finf_file << i << ";" << finf_[i] << "\n";
 
-        // Parameters file
         std::ofstream param_file(data_dir + "/parameters.txt");
-        param_file << "L = " << p_.L << "\n";
-        param_file << "M = " << p_.M << "\n";
-        param_file << "tshow = " << p_.tshow << "\n";
-        param_file << "T0 = " << p_.T0 << "\n";
-        param_file << "R0 = " << p_.R0 << "\n";
+        param_file << "L = " << p_.L << " ";
+        param_file << "M = " << p_.M << " ";
+        param_file << "R0 = " << p_.R0 << " ";
         param_file << "Ub = " << p_.Ub << "\n";
-        param_file << "a = " << p_.a << "\n";
-        param_file << "dt = " << p_.dt << "\n";
-        param_file << "init_infected = " << p_.init_infected << "\n";
-        param_file << "N = " << p_.N << "\n";
-        param_file << "Seed = " << p_.seed << "\n\n";
+        param_file << "a = " << p_.a << " ";
+        param_file << "N = " << p_.N << " ";
+        param_file << "Seed = " << p_.seed << "\n";
     }
 
-    // Progress output
     void PrintProgress(int step) {
-        std::cout << "Step " << step << "/" << p_.M << " (" << (100 * step / p_.M) << "%)" 
-                  << " | norm = " << norm_[step] << ", finf = " << finf_[step] << "\n";
+        std::cout << "Step " << step << "/" << p_.M << " (" << (100 * step / p_.M) << "%)" << " | norm = " << norm_[step] << ", finf = " << finf_[step] << "\n";
     }
 
     void PrintParameters() {
@@ -324,10 +374,7 @@ void TEST(const ModelParams& params, const std::string& name) {
 // ================== Entry Point ==================
 int main() {
     ModelParams params;
-    // Parameters can be overridden here
     params.L = 50;
-    params.M = 500;
-    params.tshow = params.M / 50;
     params.T0 = 0;
     params.R0 = 1.8;
     params.Ub = 1e-3;
@@ -335,8 +382,16 @@ int main() {
     params.dt = 0.5;
     params.init_infected = 1e-3;
     params.N = 1e8;
-    params.seed = 12;
 
-    TEST(params, "test");
+    params.M = 500;
+    params.tshow = params.M / 50;
+    params.seed = 1;
+    TEST(params, "test_short");
+
+    params.M = 5000;
+    params.tshow = params.M / 50;
+    params.seed = 2;
+    TEST(params, "test_long");
+
     return 0;
 }
