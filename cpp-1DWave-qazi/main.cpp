@@ -8,7 +8,7 @@
 #include <random>
 #include <string>
 #include <vector>
-#include <fftw3.h> // Не забудьте линковать с -lfftw3
+#include <fftw3.h>
 
 using namespace std;
 namespace fs = filesystem;
@@ -73,7 +73,7 @@ public:
     }
 
     ~EpidemicSimulator() {
-        CleanFFT(); // Освобождаем память FFTW
+        CleanFFT();
     }
 
     void Run() {
@@ -107,16 +107,13 @@ private:
     void InitFFT() {
         int L = p_.L;
 
-        // Выделение памяти под одномерные массивы для FFT
         fft_in_ = fftw_alloc_complex(L);
         fft_out_ = fftw_alloc_complex(L);
         fft_kernel_ = fftw_alloc_complex(L);
 
-        // Планы для 1D преобразования
         plan_fwd_ = fftw_plan_dft_1d(L, fft_in_, fft_out_, FFTW_FORWARD, FFTW_MEASURE);
         plan_inv_ = fftw_plan_dft_1d(L, fft_in_, fft_out_, FFTW_BACKWARD, FFTW_MEASURE);
 
-        // Инициализируем и преобразуем 1D ядро K2D_
         for (int x = 0; x < L; ++x) {
             fft_in_[x][0] = K2D_[x];
             fft_in_[x][1] = 0.0;
@@ -209,7 +206,7 @@ private:
         fftw_execute(plan_inv_);
 
         for (int x = 0; x < L; ++x) {
-            Qx[x] = fft_out_[x][0] / L; // Нормализация FFT
+            Qx[x] = fft_out_[x][0] / L;
         }
 
         // 3. FFT Convolution for I_sum -> Px
@@ -228,7 +225,7 @@ private:
         fftw_execute(plan_inv_);
 
         for (int x = 0; x < L; ++x) {
-            Px[x] = fft_out_[x][0] / L; // Нормализация FFT
+            Px[x] = fft_out_[x][0] / L;
         }
 
         // - Updates and Mutations -
