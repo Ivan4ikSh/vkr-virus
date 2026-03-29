@@ -16,7 +16,7 @@ rng(SEED);
 max_nodes = 8000; % Запас памяти под узлы
 I = zeros(1, max_nodes); 
 R = zeros(1, max_nodes); 
-I(1) = 1 / N; % Стартовый посев: 100 больных человек
+I(1) = 1 / N; % Стартовый посев
 R(1) = 0.0;
 D = zeros(max_nodes, max_nodes);
 K = zeros(max_nodes, max_nodes);
