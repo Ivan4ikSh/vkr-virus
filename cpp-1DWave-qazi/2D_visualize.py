@@ -11,25 +11,18 @@ import matplotlib.gridspec as gridspec
 
 class VirusWaveVisualizer2D:
     def __init__(self, data_dir="out/data"):
-        """
-        Visualizer for the 2D model.
-        data_dir : folder containing I_step_*.csv, R_step_*.csv, finf.csv and parameters.txt
-        """
         self.data_dir = data_dir
         if not os.path.exists(data_dir):
             print(f"Error: folder {data_dir} does not exist!")
             return
 
         self.find_data_files()
-        
         self.params_title_str = self.load_model_parameters_string()
 
-        # Colormap for composite image ("comet")
         colors = ['#FFFFFF', '#87CEEB', '#32CD32', '#FFD700', '#FF4500', '#8B0000']
         self.wave_cmap = LinearSegmentedColormap.from_list('wave', colors, N=256)
 
     def find_data_files(self):
-        """Find all I_step_*.csv and R_step_*.csv files, sort by step number."""
         pattern_I = os.path.join(self.data_dir, "I_step_*.csv")
         pattern_R = os.path.join(self.data_dir, "R_step_*.csv")
         self.I_files = sorted(glob.glob(pattern_I), key=self.extract_step_number)
@@ -59,25 +52,18 @@ class VirusWaveVisualizer2D:
             return "Parameters: N/A"
 
     def create_finf_plot(self, save_path="finf_evolution.png"):
-        """Reads finf.csv and creates a diagnostic plot."""
         csv_path = os.path.join(self.data_dir, "finf.csv")
         if not os.path.exists(csv_path):
             print(f"Warning: {csv_path} not found. Skipping finf plot.")
             return
 
-        # 1. Load data
         df = pd.read_csv(csv_path, sep=';')
-    
-        # Calculation of some observables
         avg_finf = df['finf'].mean()
         obs_str = f"mean_finf={avg_finf:.2e}"
 
-        # 3. Plotting
         fig, ax = plt.subplots(figsize=(12, 7))
-    
         ax.plot(df['step'], df['finf'], 'r-', lw=1.5)
     
-        # 4. Styling
         ax.set_xlabel('Time', fontsize=11)
         ax.set_ylabel('Fraction infected (finf)', fontsize=11)
     
@@ -93,11 +79,6 @@ class VirusWaveVisualizer2D:
         print(f"Diagnostic plot saved as {save_path}")
 
     def create_wave_snapshot(self, step_indices=None, save_path="wave_snapshots.png"):
-        """
-        Create a montage of 4 time steps.
-        Top row – infected (I), bottom – susceptible (R).
-        Parameters are now in the main title.
-        """
         if step_indices is None:
             total = len(self.I_files)
             if total == 0:
@@ -106,8 +87,8 @@ class VirusWaveVisualizer2D:
             step_indices = [0, total//3, 2*total//3, total-1]
             step_indices = [max(0, min(idx, total-1)) for idx in step_indices]
 
-        fig = plt.figure(figsize=(16, 7))
-        gs = gridspec.GridSpec(2, 4, wspace=0.25, hspace=0.3)
+        fig = plt.figure(figsize=(18, 7))
+        gs = gridspec.GridSpec(2, 4, wspace=0.4, hspace=0.1)
 
         for col, idx in enumerate(step_indices[:4]):
             if idx >= len(self.I_files):
@@ -117,34 +98,33 @@ class VirusWaveVisualizer2D:
             R = self.load_matrix(self.R_files[idx])
             step_num = self.extract_step_number(self.I_files[idx])
 
-            # Infected (top)
             ax_I = plt.subplot(gs[0, col])
             im_I = ax_I.imshow(I, cmap='Reds', aspect='auto', origin='lower', vmin=0)
-            ax_I.set_title(f'Step {step_num}', fontsize=10, fontweight='bold')
+            ax_I.set_title(f'Step {step_num}', fontsize=12, fontweight='bold', pad=10)
+            
             if col == 0:
-                ax_I.set_ylabel('y (antigenic)', fontsize=8)
-            ax_I.tick_params(labelsize=7)
+                ax_I.set_ylabel('Infected (I)\ny (neutral)', fontsize=11)
+            
+            ax_I.tick_params(labelsize=8)
             plt.colorbar(im_I, ax=ax_I, fraction=0.046, pad=0.04)
 
-            # Susceptible (bottom)
             ax_R = plt.subplot(gs[1, col])
             im_R = ax_R.imshow(R, cmap='Greens', aspect='auto', origin='lower', vmin=0)
-            ax_R.set_xlabel('x (antigenic)', fontsize=8)
+            ax_R.set_xlabel('x (antigenic)', fontsize=10)
+            
             if col == 0:
-                ax_R.set_ylabel('y (antigenic)', fontsize=8)
-            ax_R.tick_params(labelsize=7)
+                ax_R.set_ylabel('Recovered (R)\ny (neutral)', fontsize=11)
+                #ax_R.set_ylabel('y (antigenic)', fontsize=9)
+                
+            ax_R.tick_params(labelsize=8)
             plt.colorbar(im_R, ax=ax_R, fraction=0.046, pad=0.04)
 
-        plt.suptitle(f'Wave evolution\n\n{self.params_title_str}', fontsize=12, fontweight='bold', y=1.05)
-        
+        plt.suptitle(f'Wave Evolution: Infected (Top) vs Recovered (Bottom)\n{self.params_title_str}', fontsize=14, fontweight='bold', y=1.02)
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        plt.close(fig)
         print(f"Snapshot saved as {save_path}")
 
     def create_wave_animation(self, save_path="wave_evolution.gif", max_frames=300):
-        """
-        Creates an animation of wave evolution.
-        Now uses a 1x3 layout with parameters in the title without overlapping.
-        """
         if len(self.I_files) == 0:
             print("No data for animation!")
             return
@@ -209,7 +189,6 @@ class VirusWaveVisualizer2D:
             return images
         
         anim = FuncAnimation(fig, update, frames=total_frames, interval=300, blit=False, repeat=True)
-        
         print(f"Creating animation with {total_frames} frames...")
         
         if save_path.endswith('.gif'):

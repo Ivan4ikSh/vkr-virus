@@ -30,13 +30,16 @@ struct ModelParams {
     int M = 2000;                // Number of time steps
     int tshow = M / 50;          // State saving interval
     int T0 = 0;                  // First step to save
-    int shift = 2;               
+    int shift = 2;
     double asym = 0.5;           // asymerty
     double R0 = 2.5;             // Basic reproduction number
     double Ub = 1e-3;            // Mutation rate
     double a = 7.0;              // Cross-immunity scale
     double dt = 0.5;             // Time step
     double init_infected = 1e-3; // Initial fraction of infected
+
+    double r_i = 1; // Initial fraction of infected
+    double r_r = 1; // Initial fraction of infected
     int64_t N = 1e8;             // Total population size
 };
 
@@ -106,16 +109,12 @@ private:
 
         for (int x = 0; x < L; ++x) {
             for (int y = 0; y < L; ++y) {
-                // Вектор кратчайшего расстояния на торе (периодические границы со знаком)
                 double dx_signed = (x > L / 2) ? x - L : x;
                 double dy_signed = (y > L / 2) ? y - L : y;
 
-                // Поворачиваем систему координат на угол angle_
                 double dx_rot = dx_signed * cos_a + dy_signed * sin_a;
                 double dy_rot = -dx_signed * sin_a + dy_signed * cos_a;
 
-                // Считаем анизотропную дистанцию в повернутых координатах
-                // Теперь коридор "asym" всегда направлен вдоль вектора движения
                 double dist = sqrt(dx_rot * dx_rot + asym * dy_rot * dy_rot);
 
                 K2D_[x][y] = 1.0 - exp(-dist / p_.a);
@@ -128,24 +127,23 @@ private:
         int L = p_.L;
         int shift = p_.shift;
         double asym = p_.asym;
+
+        double r_i = p_.r_i;
+        double r_r = p_.r_r;
+
         I_.assign(L, vector<double>(L, 0.0));
         R_.assign(L, vector<double>(L, 0.0));
 
         double cos_a = cos(angle_);
         double sin_a = sin(angle_);
 
-        // Базовый центр и радиус сдвига
         double center = L / 2.0;
 
-        // Новые повернутые центры
         double cx_i = center + shift * cos_a;
         double cy_i = center + shift * sin_a;
 
         double cx_r = center - shift * cos_a;
         double cy_r = center - shift * sin_a;
-
-        double r_i = 1.0;
-        double r_r = 2.0;
 
         double sum_I = 0.0;
         double sum_R = 0.0;
@@ -380,23 +378,19 @@ private:
 
         // Parameters file
         std::ofstream param_file(data_dir + "/parameters.txt");
-        param_file << "L = " << p_.L << "\n";
-        param_file << "M = " << p_.M << "\n";
-        param_file << "tshow = " << p_.tshow << "\n";
-        param_file << "T0 = " << p_.T0 << "\n";
-        param_file << "R0 = " << p_.R0 << "\n";
+        param_file << "L = " << p_.L << " ";
+        param_file << "M = " << p_.M << " ";
+        param_file << "R0 = " << p_.R0 << " ";
         param_file << "Ub = " << p_.Ub << "\n";
-        param_file << "a = " << p_.a << "\n";
-        param_file << "dt = " << p_.dt << "\n";
-        param_file << "init_infected = " << p_.init_infected << "\n";
-        param_file << "N = " << p_.N << "\n";
-        param_file << "Seed = " << p_.seed << "\n\n";
+        param_file << "a = " << p_.a << " ";
+        param_file << "dt = " << p_.dt << " ";
+        param_file << "N = " << p_.N << " ";
+        param_file << "Seed = " << p_.seed;
     }
 
     // Progress output
     void PrintProgress(int step) {
-        std::cout << "Step " << step << "/" << p_.M << " (" << (100 * step / p_.M) << "%)"
-            << " | norm = " << norm_[step] << ", finf = " << finf_[step] << "\n";
+        std::cout << "Step " << step << "/" << p_.M << " (" << (100 * step / p_.M) << "%)" << " | norm = " << norm_[step] << ", finf = " << finf_[step] << "\n";
     }
 
     void PrintParameters() {
@@ -442,19 +436,36 @@ int main() {
     ModelParams params;
     // Parameters can be overridden here
     params.L = 100;
-    params.M = 5000;
+    params.M = 1000;
     params.tshow = params.M / 50;
     params.T0 = 0;
-    params.asym = 0.5;
+    params.asym = 1.0;
     params.R0 = 1.8;
     params.Ub = 1e-3;
-    params.a = 7.0;
+    params.a = 14.0;
     params.dt = 0.5;
     params.init_infected = 1e-3;
     params.N = 1e8;
-    params.shift = 1;
-    params.seed = 12;
+    params.shift = 0;
 
-    TEST(params, "test5");
+    params.r_i = 5;
+    params.r_r = 5;
+
+    params.seed = 1;
+    TEST(params, "exp1");
+
+    params.r_i = 3;
+    params.r_r = 5;
+    params.seed = 2;
+    TEST(params, "exp2");
+
+    params.asym = 0.3;
+    params.shift = 10;
+    params.seed = 3;
+    TEST(params, "exp31");
+
+    params.M = 5000;
+    params.tshow = params.M / 50;
+    TEST(params, "exp32");
     return 0;
 }

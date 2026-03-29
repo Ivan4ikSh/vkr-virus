@@ -4,11 +4,11 @@ import os
 
 # Model parameters
 dt = 0.5
-Tmax = 2000.0
-L = 160
+Tmax = 5000.0
+L = 220
 R0 = 1.8
 Ub = 1e-3
-a = 7.0
+a = 14.0
 N = 1e8
 data_dir = "out"
 

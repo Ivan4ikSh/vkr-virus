@@ -140,7 +140,7 @@ private:
         I_.assign(L, std::vector<double>(L, 0.0));
         R_.assign(L, std::vector<double>(L, 0.0));
 
-        int x0 = 15;
+        int x0 = 30;
         double infected_total = p_.init_infected;
         int left_cells = x0 * L;
 
@@ -371,21 +371,21 @@ void TEST(const ModelParams& params, const std::string& name) {
 // ================== Entry Point ==================
 int main() {
     ModelParams params;
-    params.L = 50;
+    params.L = 100;
     params.T0 = 0;
     params.R0 = 1.8;
     params.Ub = 1e-3;
-    params.a = 6.0;
+    params.a = 14.0;
     params.dt = 0.5;
     params.init_infected = 1e-3;
     params.N = 1e8;
 
-    params.M = 500;
+    params.M = 1'000;
     params.tshow = params.M / 50;
     params.seed = 1;
     TEST(params, "test_short");
 
-    params.M = 5000;
+    params.M = 10'000;
     params.tshow = params.M / 50;
     params.seed = 2;
     TEST(params, "test_long");

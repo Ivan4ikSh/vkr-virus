@@ -30,10 +30,11 @@ double GetStochasticCorrection(const double& val, const double& N, std::mt19937&
 
     double new_val = 0.0;
     int xm = static_cast<int>(round(6.0 * lambda));
+    if (xm == 0) return 0.0;
     std::uniform_real_distribution<double> dist(0.0, 1.0);
     int count = 0;
     for (int n = 0; n < xm; ++n) {
-        if (xm*dist(gen) < lambda) ++count;
+        if (xm * dist(gen) < lambda) ++count;
     }
 
     return static_cast<double>(count) / N;
@@ -68,24 +69,20 @@ void WaveSimulation(const Params& params) {
     const int& M = static_cast<int>(round(Tmax / dt));
     std::mt19937 gen(seed);
 
-    // Buffers and Pointers
     std::vector<double> I_buf1(L, 0.0), I_buf2(L, 0.0);
     std::vector<double> R_buf1(L, 0.0), R_buf2(L, 0.0);
     auto* I_cur = &I_buf1, * I_next = &I_buf2;
     auto* R_cur = &R_buf1, * R_next = &R_buf2;
 
-    // Initial Conditions
-    (*I_cur)[19] = 1e-3;
-    const double& init_R = (1.0 - 1e-3) / 19.0;
-    for (int j = 0; j < 19; ++j) (*R_cur)[j] = init_R;
+    int start_node = 35;
+    (*I_cur)[start_node] = 1e-3;
+    const double& init_R = (1.0 - 1e-3) / start_node;
+    for (int j = 0; j < start_node; ++j) (*R_cur)[j] = init_R;
 
     const std::vector<double>& K = PrecomputeKernel(L, a);
 
-    // Time series and Slices
     std::vector<double> norm(M);
     std::vector<double> finf(M);
-    std::vector<double> QI(M);
-    std::vector<double> PR(M);
     std::vector<double> slice_times;
     std::vector<std::vector<double>> I_slices;
     std::vector<std::vector<double>> R_slices;
@@ -105,23 +102,21 @@ void WaveSimulation(const Params& params) {
         norm[i] = norm_i;
         finf[i] = sumI_old / norm_i;
 
-        // Spatial update loop
         for (int j = 0; j < L; ++j) {
             double Qj = 0.0, Pj = 0.0;
             for (int k = 0; k <= j; ++k) Qj += R_old[k] * K[j - k];
             for (int k = j; k < L; ++k) Pj += I_old[k] * K[k - j];
 
             if (t > Txy) {
+                Qj = 0.0; Pj = 0.0;
                 for (int k = j; k < L; ++k) Qj += R_old[k] * K[k - j];
                 for (int k = 0; k <= j; ++k) Pj += I_old[k] * K[j - k];
             }
 
-            // Dynamics and Stochasticity
             const double& newI = I_old[j] * (1.0 + dt * (R0 * Qj - 1.0));
             Inew[j] = GetStochasticCorrection(newI, N, gen);
             Rnew[j] = R_old[j] * (1.0 - dt * R0 * Pj) + dt * I_old[j];
 
-            // Mutations
             if (j > 0 && j < L - 1) {
                 const double& in = dt * Ub * (I_old[j + 1] + I_old[j - 1]);
                 const double& out = dt * Ub * 2.0 * I_old[j];
@@ -129,19 +124,17 @@ void WaveSimulation(const Params& params) {
             }
         }
 
-        // Boundary conditions & Normalization
         Inew[0] = I_old[0] + dt * Ub * (I_old[1] - I_old[0]);
         Inew[L - 1] = I_old[L - 1] + dt * Ub * (I_old[L - 2] - I_old[L - 1]);
-        for (double& val : Inew) val /= norm_i;
 
-        // Statistics at T0
-        if (i == t0_step) {
+        if (norm_i > 0) for (double& val : Inew) val /= norm_i;
+
+        if (i == t0_step && sumI_old > 0) {
             double sum_pos = 0.0, sI = 0.0;
             for (int j = 0; j < L; ++j) { sum_pos += Inew[j] * (j + 1); sI += Inew[j]; }
             meanI0 = sum_pos / sI;
         }
 
-        // Save snapshots
         if (t > T0 && (i % show_step == 0)) {
             slice_times.push_back(t);
             I_slices.push_back(Inew);
@@ -150,33 +143,34 @@ void WaveSimulation(const Params& params) {
 
         std::swap(I_cur, I_next);
         std::swap(R_cur, R_next);
-        if (i % 500 == 0) std::cout << "t = " << t << " | norm = " << norm_i << "\n";
+        if (i % 500 == 0) std::cout << "t = " << t << " | norm = " << norm_i << " | finf = " << finf[i] << "\n";
     }
 
-    // Post-processing & Final Results
     const auto& I_final = *I_cur;
     const auto& R_final = *R_cur;
     const double& sumI = std::accumulate(I_final.begin(), I_final.end(), 0.0);
     const double& sumR = std::accumulate(R_final.begin(), R_final.end(), 0.0);
-    double meanI = 0.0;
-    double meanR = 0.0;
-    for (int j = 0; j < L; ++j) {
-        meanI += I_final[j] * (j + 1);
-        meanR += R_final[j] * (j + 1);
-    }
-    meanI /= sumI;
-    meanR /= sumR;
 
-    const double& speed = (meanI - meanI0) / (Tmax - T0);
-    double sdI = 0.0, sdR = 0.0;
-    for (int j = 0; j < L; ++j) {
-        sdI += I_final[j] * ((j + 1) - meanI) * ((j + 1) - meanI);
-        sdR += R_final[j] * ((j + 1) - meanR) * ((j + 1) - meanR);
-    }
-    sdI = sqrt(sdI / sumI);
-    sdR = sqrt(sdR / sumR);
+    double meanI = 0.0, meanR = 0.0, sdI = 0.0, sdR = 0.0, speed = 0.0;
 
-    // Save everything
+    // ИСПРАВЛЕНИЕ 2: Защита от NaN
+    if (sumI > 0) {
+        for (int j = 0; j < L; ++j) {
+            meanI += I_final[j] * (j + 1);
+            meanR += R_final[j] * (j + 1);
+        }
+        meanI /= sumI;
+        meanR /= sumR;
+
+        speed = (meanI - meanI0) / (Tmax - T0);
+        for (int j = 0; j < L; ++j) {
+            sdI += I_final[j] * ((j + 1) - meanI) * ((j + 1) - meanI);
+            sdR += R_final[j] * ((j + 1) - meanR) * ((j + 1) - meanR);
+        }
+        sdI = sqrt(sdI / sumI);
+        sdR = sqrt(sdR / sumR);
+    }
+
     SaveToFile("norm.txt", norm);
     SaveToFile("finf.txt", finf);
     SaveToFile("I_final.txt", I_final);
@@ -205,19 +199,17 @@ int main() {
     Params params;
     params.R0 = 1.8;
     params.Ub = 1e-3;
-    params.a = 7.0;
-    params.L = 160;
+    params.a = 14.0;
+    params.L = 220;
     params.N = 1e8;
-    params.Tmax = 2000;
+    params.Tmax = 5000;
     params.T0 = 500;
-    params.Txy = 500;
+    params.Txy = 5000;
     params.dt = 0.5;
-    params.seed = 42;
+    params.seed = 1;
 
     WaveSimulation(params);
 
-    if (std::system("python 1D_visualize.py") != 0) {
-        std::cerr << "Visualizer failed to start.\n";
-    }
+    if (std::system("python 1D_visualize.py") != 0) std::cerr << "Visualizer failed to start.\n";
     return 0;
 }
