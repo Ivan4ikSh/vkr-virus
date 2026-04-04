@@ -153,37 +153,66 @@ def find_main_trunk(df):
     if df.empty:
         return set(), set()
     
+    # 1. Находим самый глубокий узел
     farthest_node_row = df.loc[df['depth'].idxmax()]
     farthest_node_id = int(farthest_node_row['id'])
     
     parent_of = {}
     is_infected_dict = {}
+    children_of = {}
+    
+    # Считываем связи и статус инфекции
     for _, row in df.iterrows():
         nid = int(row['id'])
-        parent_of[nid] = int(row['parent_id'])
+        pid = int(row['parent_id'])
+        parent_of[nid] = pid
         is_infected_dict[nid] = int(row['is_infected']) == 1
         
+        # Запоминаем детей каждого узла для проверки "соседних веток"
+        if nid not in children_of:
+            children_of[nid] = []
+        if pid != -1:
+            if pid not in children_of:
+                children_of[pid] = []
+            children_of[pid].append(nid)
+            
+    # 2. Восстанавливаем магистральный путь от конца к корню
+    path_up = []
+    curr = farthest_node_id
+    while curr != -1 and curr in parent_of:
+        path_up.append(curr)
+        curr = parent_of.get(curr, -1)
+        
+    # 3. Разворачиваем путь, чтобы идти ОТ КОРНЯ ВНИЗ
+    path_down = path_up[::-1]
+    
     path_nodes = set()
     path_edges = set()
     
-    current_node = farthest_node_id
-    hit_healthy = False
-    
-    while current_node != -1 and current_node in parent_of:
-        parent_id = parent_of.get(current_node, -1)
+    # 4. Идем по стволу и применяем ваши условия
+    for i in range(len(path_down)):
+        curr = path_down[i]
         
-        if not hit_healthy:
-            if not is_infected_dict.get(current_node, False):
-                hit_healthy = True
-                path_nodes.add(current_node)
-        else:
-            path_nodes.add(current_node)
+        # УСЛОВИЕ 1: Если сам узел на пути заражен - обрываем ствол
+        if is_infected_dict[curr]:
+            break
             
-        if hit_healthy and parent_id != -1:
-            path_edges.add((current_node, parent_id))
-
-        current_node = parent_id
+        # Добавляем узел в ствол (он точно здоров)
+        path_nodes.add(curr)
         
+        # Добавляем ребро от родителя
+        if i > 0:
+            parent = path_down[i-1]
+            path_edges.add((curr, parent))
+            
+        # УСЛОВИЕ 2: Проверяем все исходящие (соседние) ветки
+        children = children_of.get(curr, [])
+        if len(children) > 0:
+            # Если ВСЕ ответвления от этого узла ведут в инфекцию
+            all_children_infected = all(is_infected_dict[child] for child in children)
+            if all_children_infected:
+                break # Обрываем ствол, дальше начинается только красная зона
+                
     return path_nodes, path_edges
 
 def plot_trees(data_dir, output_dir, params_str):
@@ -201,12 +230,11 @@ def plot_trees(data_dir, output_dir, params_str):
 
     files_to_plot = snapshot_files[:4]
     
-    fig, axes = plt.subplots(1, 4, figsize=(28, 6)) 
+    fig, axes = plt.subplots(2, 2, figsize=(16, 14)) 
     
-    # Добавляем общий заголовок над всеми 4 графиками дерева
     title = 'Strain Tree Snapshots'
     if params_str: title += f'\n{params_str}'
-    fig.suptitle(title, fontsize=14)
+    fig.suptitle(title, fontsize=16)
     
     axes = axes.flatten()
 
@@ -223,12 +251,15 @@ def plot_trees(data_dir, output_dir, params_str):
             nid = int(row['id'])
             coords[nid] = (row['creation_step'], node_y_dict[nid])
 
-        regular_edges = []
+        # 3 группы веток (ребер)
+        extinct_edges = []
+        infected_edges = []
         trunk_edges = []
         
         for _, row in df.iterrows():
             nid = int(row['id'])
             parent_id = int(row['parent_id'])
+            is_node_infected = int(row['is_infected']) == 1
             
             if parent_id != -1 and parent_id in coords:
                 child_coord = coords[nid]
@@ -237,17 +268,27 @@ def plot_trees(data_dir, output_dir, params_str):
                 v_segment = [parent_coord, (parent_coord[0], child_coord[1])]
                 h_segment = [(parent_coord[0], child_coord[1]), child_coord]
                 
+                # Сортируем ребра по категориям
                 if (nid, parent_id) in trunk_edge_set:
                     trunk_edges.append(v_segment)
                     trunk_edges.append(h_segment)
+                elif is_node_infected:
+                    infected_edges.append(v_segment)
+                    infected_edges.append(h_segment)
                 else:
-                    regular_edges.append(v_segment)
-                    regular_edges.append(h_segment)
+                    extinct_edges.append(v_segment)
+                    extinct_edges.append(h_segment)
 
-        lc_regular = LineCollection(regular_edges, colors='#7f8c8d', alpha=0.15, linewidths=0.6)
-        ax.add_collection(lc_regular)
+        # 1. Вымершие ветки
+        lc_extinct = LineCollection(extinct_edges, colors='blue', alpha=0.3, linewidths=0.5)
+        ax.add_collection(lc_extinct)
 
-        lc_trunk = LineCollection(trunk_edges, colors='#27ae60', alpha=0.8, linewidths=1.2, zorder=3)
+        # 2. Зараженные ветки
+        lc_infected = LineCollection(infected_edges, colors='red', alpha=0.8, linewidths=0.5)
+        ax.add_collection(lc_infected)
+
+        # 3. Ствол
+        lc_trunk = LineCollection(trunk_edges, colors='green', alpha=1, linewidths=0.7)
         ax.add_collection(lc_trunk)
 
         df['y_coord'] = df['id'].map(node_y_dict)
@@ -256,13 +297,14 @@ def plot_trees(data_dir, output_dir, params_str):
         is_healthy = (df['is_infected'] == 0) & (~df['id'].isin(trunk_node_set))
         is_trunk = df['id'].isin(trunk_node_set)
 
-        ax.scatter(df[is_infected]['creation_step'], df[is_infected]['y_coord'], color='#e74c3c', s=5, alpha=1.0, zorder=5) 
-        ax.scatter(df[is_healthy]['creation_step'], df[is_healthy]['y_coord'], color='#3498db', s=3, alpha=0.2) 
-        ax.scatter(df[is_trunk]['creation_step'], df[is_trunk]['y_coord'], color='#2ecc71', s=6, alpha=1.0, zorder=10)
+        ax.scatter(df[is_healthy]['creation_step'], df[is_healthy]['y_coord'], color='blue', s=2, alpha=0.3) 
+        ax.scatter(df[is_infected]['creation_step'], df[is_infected]['y_coord'], color='red', s=2, alpha=1.0) 
+        ax.scatter(df[is_trunk]['creation_step'], df[is_trunk]['y_coord'], color='green', s=2, alpha=1.0)
 
         ax.set_title(f'Step: {step}')
         ax.set_xlabel('Time')
-        if idx == 0:
+        
+        if idx % 2 == 0:
             ax.set_ylabel('Topological Shift (Active -> Up)')
         else:
             ax.set_ylabel('')
@@ -272,17 +314,17 @@ def plot_trees(data_dir, output_dir, params_str):
             ax.set_ylim(-1, max(node_y_dict.values()) * 1.05 + 1)
             
         if idx == 0:
+            # Обновленная легенда (линия + точка)
             legend_elements = [
-                Line2D([0], [0], marker='o', color='w', label='Active', markerfacecolor='#e74c3c', markersize=5),
-                Line2D([0], [0], marker='o', color='w', label='Recovered', markerfacecolor='#3498db', markersize=4, alpha=0.5),
-                Line2D([0], [0], color='#27ae60', lw=1.5, label='Historical Trunk')
+                Line2D([0], [0], color='#e74c3c', lw=1.5, marker='o', label='Active Branches', markerfacecolor='#e74c3c', markersize=5),
+                Line2D([0], [0], color='black', alpha=0.3, lw=1.0, marker='o', label='Extinct Branches', markerfacecolor='black', markersize=4),
+                Line2D([0], [0], color='#27ae60', lw=2.0, marker='o', label='Historical Trunk', markerfacecolor='#2ecc71', markersize=5)
             ]
             ax.legend(handles=legend_elements, loc='upper left', fontsize='small')
 
     for i in range(len(files_to_plot), 4):
         fig.delaxes(axes[i])
 
-    # rect используется, чтобы suptitle не накладывался на сами графики
     plt.tight_layout(rect=[0, 0, 1, 0.95])
     out_file = os.path.join(output_dir, 'tree_snapshots.png')
     plt.savefig(out_file, dpi=300, facecolor='white', bbox_inches='tight')
@@ -301,7 +343,6 @@ def main():
 
     print("Starting plot generation...")
     
-    # Считываем параметры один раз и передаем их в функции отрисовки
     params_str = get_params_string(args.data_dir)
     
     plot_timeseries(args.data_dir, args.output_dir, params_str)
