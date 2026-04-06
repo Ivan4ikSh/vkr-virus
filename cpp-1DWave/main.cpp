@@ -69,8 +69,10 @@ void WaveSimulation(const Params& params) {
     const int& M = static_cast<int>(round(Tmax / dt));
     std::mt19937 gen(seed);
 
-    std::vector<double> I_buf1(L, 0.0), I_buf2(L, 0.0);
-    std::vector<double> R_buf1(L, 0.0), R_buf2(L, 0.0);
+    std::vector<double> I_buf1(L, 0.0);
+    std::vector<double> I_buf2(L, 0.0);
+    std::vector<double> R_buf1(L, 0.0);
+    std::vector<double> R_buf2(L, 0.0);
     auto* I_cur = &I_buf1, * I_next = &I_buf2;
     auto* R_cur = &R_buf1, * R_next = &R_buf2;
 

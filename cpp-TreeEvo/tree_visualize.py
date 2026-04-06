@@ -2,6 +2,7 @@ import os
 import sys
 import glob
 import argparse
+from tkinter import font
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
@@ -51,10 +52,10 @@ def plot_timeseries(data_dir, output_dir, params_str):
     # Добавляем параметры в заголовок
     title = 'Epidemic Dynamics: Total Fraction of Infected (finf)'
     if params_str: title += f'\n{params_str}'
-    plt.title(title, fontsize=11)
+    plt.title(title, fontsize=14)
     
-    plt.xlabel('Simulation Step')
-    plt.ylabel('Fraction of Infected (total_i)')
+    plt.xlabel('Simulation Step', fontsize=14)
+    plt.ylabel('Fraction of Infected (total_i)', fontsize=14)
     plt.grid(True, linestyle='--', alpha=0.7)
     plt.tight_layout()
     
@@ -86,10 +87,10 @@ def plot_wave(data_dir, output_dir, params_str):
     # Добавляем параметры в заголовок
     title = 'Evolution of Viral Lineages (Traveling Wave)'
     if params_str: title += f'\n{params_str}'
-    plt.title(title, fontsize=12)
+    plt.title(title, fontsize=14)
     
-    plt.xlabel('Simulation Step')
-    plt.ylabel('Fraction of Infected (log)')
+    plt.xlabel('Simulation Step', fontsize=14)
+    plt.ylabel('Fraction of Infected (log)', fontsize=14)
     
     plt.grid(True, which="both", linestyle='--', alpha=0.5)
     plt.tight_layout()
@@ -230,11 +231,11 @@ def plot_trees(data_dir, output_dir, params_str):
 
     files_to_plot = snapshot_files[:4]
     
-    fig, axes = plt.subplots(2, 2, figsize=(16, 14)) 
+    fig, axes = plt.subplots(2, 2, figsize=(12, 14)) 
     
     title = 'Strain Tree Snapshots'
     if params_str: title += f'\n{params_str}'
-    fig.suptitle(title, fontsize=16)
+    fig.suptitle(title, fontsize=20)
     
     axes = axes.flatten()
 
@@ -301,11 +302,11 @@ def plot_trees(data_dir, output_dir, params_str):
         ax.scatter(df[is_infected]['creation_step'], df[is_infected]['y_coord'], color='red', s=2, alpha=1.0) 
         ax.scatter(df[is_trunk]['creation_step'], df[is_trunk]['y_coord'], color='green', s=2, alpha=1.0)
 
-        ax.set_title(f'Step: {step}')
-        ax.set_xlabel('Time')
+        ax.set_title(f'Step: {step}', fontsize=14)
+        ax.set_xlabel('Time', fontsize=14)
         
         if idx % 2 == 0:
-            ax.set_ylabel('Topological Shift (Active -> Up)')
+            ax.set_ylabel('Topological Shift (Active -> Up)', fontsize=14)
         else:
             ax.set_ylabel('')
             
@@ -320,12 +321,12 @@ def plot_trees(data_dir, output_dir, params_str):
                 Line2D([0], [0], color='black', alpha=0.3, lw=1.0, marker='o', label='Extinct Branches', markerfacecolor='black', markersize=4),
                 Line2D([0], [0], color='#27ae60', lw=2.0, marker='o', label='Historical Trunk', markerfacecolor='#2ecc71', markersize=5)
             ]
-            ax.legend(handles=legend_elements, loc='upper left', fontsize='small')
+            ax.legend(handles=legend_elements, loc='upper left', fontsize=14)
 
     for i in range(len(files_to_plot), 4):
         fig.delaxes(axes[i])
 
-    plt.tight_layout(rect=[0, 0, 1, 0.95])
+    plt.tight_layout(rect=[0, 0, 1, 1])
     out_file = os.path.join(output_dir, 'tree_snapshots.png')
     plt.savefig(out_file, dpi=300, facecolor='white', bbox_inches='tight')
     plt.close()
@@ -342,7 +343,6 @@ def main():
         os.makedirs(args.output_dir)
 
     print("Starting plot generation...")
-    
     params_str = get_params_string(args.data_dir)
     
     plot_timeseries(args.data_dir, args.output_dir, params_str)

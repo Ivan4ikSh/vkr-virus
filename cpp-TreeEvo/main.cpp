@@ -108,7 +108,8 @@ public:
         for (int step = 1; step <= params_.M; ++step) {
             Step(step);
             if (step == T0_step) {
-                double sPos = 0.0, sI = 0.0;
+                double sPos = 0.0;
+                double sI = 0.0;
                 for (Node* n : tree_.GetAllNodes()) { sPos += n->i * n->absolute_x; sI += n->i; }
                 if (sI > 0) meanI0_ = sPos / sI;
             }
@@ -116,7 +117,8 @@ public:
             if (step == params_.M / 4 || step == params_.M / 2 || step == 3 * params_.M / 4 || step == params_.M) SaveSnapshot(step);
         }
 
-        double sPos = 0.0, sI = 0.0;
+        double sPos = 0.0;
+        double sI = 0.0;
         for (Node* n : tree_.GetAllNodes()) { sPos += n->i * n->absolute_x; sI += n->i; }
         if (sI > 0) {
             double meanI = sPos / sI;
@@ -151,7 +153,6 @@ public:
 
         // 3. Сохранение ВСЕХ параметров в observables.txt
         std::ofstream f_obs(data_dir + "/observables.txt");
-
         // Входные параметры модели
         f_obs << "R0=" << params_.R0 << "\n";
         f_obs << "Ub=" << params_.Ub << "\n";
@@ -164,7 +165,6 @@ public:
         f_obs << "finf=" << final_finf_ << "\n";
 
         f_obs.close();
-
         std::cout << "Data saved to " << data_dir << std::endl;
     }
 
@@ -174,7 +174,9 @@ private:
     std::vector<double> total_i_history_;
     std::vector<std::map<int, double>> wave_history_;
     std::mt19937 rng_;
-    double meanI0_ = 0.0, speed_ = 0.0, final_finf_ = 0.0;
+    double meanI0_ = 0.0;
+    double speed_ = 0.0;
+    double final_finf_ = 0.0;
 
     double GetDistance(Node* u, Node* v) {
         double d = 0.0;
@@ -188,8 +190,10 @@ private:
     double GetStochasticCorrection(const double& val) {
         double lambda = val * params_.N;
         if (lambda >= 10.0) return val;
+
         int xm = static_cast<int>(std::round(6.0 * lambda));
         if (xm == 0) return 0.0;
+
         std::uniform_real_distribution<double> dist(0.0, 1.0);
         int count = 0;
         for (int n = 0; n < xm; ++n) if (xm * dist(rng_) < lambda) ++count;
@@ -214,7 +218,6 @@ private:
                 if (j == k) continue;
                 double dist = GetDistance(nodes[j], nodes[k]);
                 double k_val = 1.0 - std::exp(-dist / params_.a);
-                // Асимметричный иммунитет по абсолютной координате [cite: 2095, 2894]
                 if (nodes[j]->absolute_x > nodes[k]->absolute_x) Q[j] += k_val * nodes[k]->r;
                 if (nodes[k]->absolute_x > nodes[j]->absolute_x) P[j] += k_val * nodes[k]->i;
             }
@@ -225,7 +228,7 @@ private:
             double I_new = nodes[j]->i * (1.0 + params_.dt * (params_.R0 * Q[j] - 1.0));
             nodes[j]->r = std::max(0.0, nodes[j]->r * (1.0 - params_.dt * params_.R0 * P[j]) + params_.dt * nodes[j]->i);
             nodes[j]->i = GetStochasticCorrection(std::max(0.0, I_new));
-            if (nodes[j]->i * params_.N < 1.0) nodes[j]->i = 0.0; // Жесткое вымирание
+            if (nodes[j]->i * params_.N < 1.0) nodes[j]->i = 0.0;
             nodes[j]->is_infected = (nodes[j]->i > CONST::EPS);
             total_i += nodes[j]->i;
         }
@@ -266,8 +269,7 @@ private:
         out << "id,parent_id,depth,creation_step,i,r,is_infected,edge_len,absolute_x\n";
         for (Node* n : tree_.GetAllNodes()) {
             int p = n->parent ? n->parent->id : -1;
-            out << n->id << "," << p << "," << n->depth << "," << n->creation_step << ","
-                << n->i << "," << n->r << "," << n->is_infected << "," << n->edge_length << "," << n->absolute_x << "\n";
+            out << n->id << "," << p << "," << n->depth << "," << n->creation_step << "," << n->i << "," << n->r << "," << n->is_infected << "," << n->edge_length << "," << n->absolute_x << "\n";
         }
     }
 };
@@ -300,7 +302,7 @@ void TEST(const ModelParams& params, const std::string& name) {
 
 int main() {
     ModelParams params;
-    params.M = 5000;
+    params.M = 5'000;
     params.T0 = params.M / 10;
     params.iter = params.M / 10;
     params.R0 = 1.8;

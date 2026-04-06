@@ -112,7 +112,7 @@ class VirusWaveVisualizer2D:
             ax_I.set_title(f'Step {step_num}', fontweight='bold')
             ax_I.set_xticks([])
             if col == 0:
-                ax_I.set_ylabel('Infected (I)\ny (antigenic)')
+                ax_I.set_ylabel('Infected (I)\ny (neutral)')
             
             cbar_I = plt.colorbar(im_I, ax=ax_I)
             cbar_I.ax.tick_params(labelsize=BASE_SIZE)
