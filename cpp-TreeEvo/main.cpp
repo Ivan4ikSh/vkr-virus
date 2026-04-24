@@ -310,7 +310,7 @@ int main() {
     params.a = 14.0;
     params.seed = 1;
 
-    TEST(params, "exp1");
+    TEST(params, "exp");
 
     return 0;
 }
