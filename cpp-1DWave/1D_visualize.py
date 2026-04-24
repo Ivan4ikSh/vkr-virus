@@ -11,7 +11,9 @@ plt.rcParams.update({
     'xtick.labelsize': FONT_SIZE - 2, # Числа на оси X
     'ytick.labelsize': FONT_SIZE - 2, # Числа на оси Y
     'legend.fontsize': FONT_SIZE - 2, # Шрифт легенды
-    'figure.titlesize': FONT_SIZE + 4 # Общий заголовок фигуры
+    'figure.titlesize': FONT_SIZE + 4, # Общий заголовок фигуры
+    'axes.spines.top': False,
+    'axes.spines.right': False
 })
 
 # Model parameters
@@ -24,9 +26,15 @@ a = 14.0
 N = 1e8
 data_dir = "out"
 
+# --- КОНВЕРТАЦИЯ В ГОДЫ ---
+DAYS_IN_CYCLE = 2.6
+DAYS_IN_YEAR = 365.25
+TO_YEARS = DAYS_IN_CYCLE / DAYS_IN_YEAR
+
 # Read Observables from file
 obs_file = os.path.join(data_dir, "observables.txt")
 observables = {"speed": 0.0, "sdI": 0.0, "sdR": 0.0, "finf": 0.0}
+
 if os.path.exists(obs_file):
     with open(obs_file, "r") as f:
         for line in f:
@@ -43,13 +51,18 @@ title_text = f"{params_str}\n{obs_str}"
 norm = np.loadtxt(os.path.join(data_dir, "norm.txt"))
 finf = np.loadtxt(os.path.join(data_dir, "finf.txt"))
 slice_times = np.atleast_1d(np.loadtxt(os.path.join(data_dir, "slice_times.txt")))
-time = np.arange(dt, Tmax + 1e-9, dt)
+
+# Генерируем время в циклах и сразу переводим в годы
+time_cycles = np.arange(dt, Tmax + 1e-9, dt)
+time_years = time_cycles * TO_YEARS
+
 n_slices = len(slice_times)
 
 # --- Figure 1: I and R Distributions ---
-fig1, ax1 = plt.subplots(figsize=(12, 8)) # Увеличил размер фигуры, чтобы крупный текст влез
+fig1, ax1 = plt.subplots(figsize=(12, 8))
 x_vals = np.arange(L)
-for idx, t in enumerate(slice_times):
+
+for idx, t_year in enumerate(slice_times):
     I_slice = np.loadtxt(os.path.join(data_dir, f"I_slice_{idx}.txt"))
     R_slice = np.loadtxt(os.path.join(data_dir, f"R_slice_{idx}.txt"))
     
@@ -60,16 +73,16 @@ for idx, t in enumerate(slice_times):
 
 ax1.set_xlabel('Antigenic coordinate (Mutation number)')
 ax1.set_ylabel('Density')
-
-# Используем заданный в rcParams размер или указываем явно через FONT_SIZE
 ax1.set_title(f'Distributions at different times\n{title_text}', pad=20)
-ax1.grid(True, linestyle=':', alpha=0.6)
+
+ax1.grid(False) 
+ax1.spines['top'].set_visible(False)   
+ax1.spines['right'].set_visible(False) 
 
 handles, labels = ax1.get_legend_handles_labels()
 by_label = dict(zip(labels, handles))
 ax1.legend(by_label.values(), by_label.keys())
 
-# Увеличиваем отступ сверху (rect), так как заголовок стал больше
 fig1.tight_layout(rect=[0, 0, 1, 1]) 
 file_dist = os.path.join(data_dir, "1D_distributions.png")
 fig1.savefig(file_dist, dpi=150)
@@ -78,13 +91,17 @@ plt.close(fig1)
 # --- Figure 2: finf behavior ---
 fig2, ax_finf = plt.subplots(figsize=(12, 8))
 
-ax_finf.plot(time, finf, 'r-')
-ax_finf.set_xlabel('Time')
+# Строим график finf от времени в ГОДАХ
+ax_finf.plot(time_years, finf, 'r-')
+ax_finf.set_xlabel('Time (years)') # Изменили подпись
 ax_finf.set_ylabel('Fraction infected (finf)')
 
 full_title = f'Fraction infected over time\n{title_text}'
 ax_finf.set_title(full_title, pad=20)
-ax_finf.grid(True, linestyle=':', alpha=0.6)
+
+ax_finf.grid(False) 
+ax_finf.spines['top'].set_visible(False)   
+ax_finf.spines['right'].set_visible(False) 
 
 fig2.tight_layout(rect=[0, 0, 1, 1])
 file_diag = os.path.join(data_dir, "1D_diagnostics.png")
