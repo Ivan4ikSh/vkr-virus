@@ -7,6 +7,10 @@
 #include <string>
 #include <filesystem>
 
+const double DAYS_IN_CYCLE = 2.6;
+const double DAYS_IN_YEAR = 365.25;
+const double TO_YEARS = DAYS_IN_CYCLE / DAYS_IN_YEAR;
+
 struct Params {
     double R0;
     double Ub;
@@ -138,7 +142,8 @@ void WaveSimulation(const Params& params) {
         }
 
         if (t > T0 && (i % show_step == 0)) {
-            slice_times.push_back(t);
+            double time_in_years = t * TO_YEARS;
+            slice_times.push_back(time_in_years);
             I_slices.push_back(Inew);
             R_slices.push_back(Rnew);
         }
