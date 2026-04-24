@@ -32,6 +32,20 @@ class VirusWaveVisualizer2D:
         self.find_data_files()
         self.params_title_str = self.load_model_parameters_string()
 
+        # --- РАСЧЕТ КОЭФФИЦИЕНТА ДЛЯ ПЕРЕВОДА В ГОДЫ ---
+        DAYS_IN_CYCLE = 5.2
+        DAYS_IN_YEAR = 365.25
+        self.dt = 0.5  # Значение по умолчанию
+        
+        # Пытаемся вытащить dt из строки параметров с помощью регулярного выражения
+        match = re.search(r'dt\s*=\s*([0-9.]+)', self.params_title_str)
+        if match:
+            self.dt = float(match.group(1))
+            
+        # Формула: (шаги * dt) = циклы -> (циклы * 5) / 365.25 = годы
+        self.TO_YEARS = (self.dt * DAYS_IN_CYCLE) / DAYS_IN_YEAR
+        # -----------------------------------------------
+
         colors = ['#FFFFFF', '#87CEEB', '#32CD32', '#FFD700', '#FF4500', '#8B0000']
         self.wave_cmap = LinearSegmentedColormap.from_list('wave', colors, N=256)
 
@@ -74,17 +88,26 @@ class VirusWaveVisualizer2D:
         avg_finf = df['finf'].mean()
         obs_str = f"mean_finf={avg_finf:.2e}"
 
+        # --- ПРИМЕНЯЕМ ФОРМУЛУ ПЕРЕВОДА В ГОДЫ ---
+        df['year'] = df['step'] * self.TO_YEARS
+
         fig, ax = plt.subplots(figsize=(14, 9))
-        ax.plot(df['step'], df['finf'], 'r-', lw=2)
+        
+        # Строим график от новой колонки 'year'
+        ax.plot(df['year'], df['finf'], 'r-', lw=2)
     
-        ax.set_xlabel('Time')
+        ax.set_xlabel('Time (years)') # Изменили подпись
         ax.set_ylabel('Fraction infected (finf)')
     
         full_title = f"Fraction infected over time\n\n{self.params_title_str}\n\nObservables: {obs_str}"
         ax.set_title(full_title, pad=20)
     
-        ax.grid(True, linestyle=':', alpha=0.6)
-        ax.set_xlim(df['step'].min() - 50, df['step'].max() + 50)
+        ax.grid(False)
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        
+        # Обновляем пределы графика по оси X
+        ax.set_xlim(df['year'].min(), df['year'].max())
 
         plt.tight_layout()
         plt.savefig(save_path)
@@ -105,14 +128,17 @@ class VirusWaveVisualizer2D:
             I = self.load_matrix(self.I_files[idx])
             R = self.load_matrix(self.R_files[idx])
             step_num = self.extract_step_number(self.I_files[idx])
+            
+            # Считаем текущий год для заголовка
+            year_val = step_num * self.TO_YEARS
 
             # --- Ряд Infected ---
             ax_I = plt.subplot(gs[0, col])
             im_I = ax_I.imshow(I, cmap='Reds', aspect='auto', origin='lower', vmin=0)
-            ax_I.set_title(f'Step {step_num}', fontweight='bold')
+            ax_I.set_title(f'Year {year_val:.1f}', fontweight='bold') # Подписываем годами
             ax_I.set_xticks([])
             if col == 0:
-                ax_I.set_ylabel('Infected (I)\ny (antigenic)')
+                ax_I.set_ylabel('Infected (I)\ny (neutral)')
             
             cbar_I = plt.colorbar(im_I, ax=ax_I)
             cbar_I.ax.tick_params(labelsize=BASE_SIZE)
@@ -132,13 +158,11 @@ class VirusWaveVisualizer2D:
             cbar_R = plt.colorbar(im_R, ax=ax_R)
             cbar_R.ax.tick_params(labelsize=BASE_SIZE)
         
-            # Принудительный формат 1e-n для нижнего ряда
             fmt_R = ticker.ScalarFormatter(useMathText=False)
             fmt_R.set_scientific(True)
             fmt_R.set_powerlimits((0, 0))
             cbar_R.ax.yaxis.set_major_formatter(fmt_R)
 
-        # Настройка общего заголовка
         fig.suptitle(f'Wave Evolution\n{self.params_title_str}', fontweight='bold', y=0.98)
         plt.tight_layout(rect=[0, 0, 1, 1])
 
@@ -153,7 +177,7 @@ class VirusWaveVisualizer2D:
             
         total_frames = min(max_frames, len(self.I_files))
         
-        fig = plt.figure(figsize=(22, 9)) # Увеличен размер
+        fig = plt.figure(figsize=(22, 9))
         gs = gridspec.GridSpec(1, 3, width_ratios=[1, 1, 1])
         
         I0 = self.load_matrix(self.I_files[0])
@@ -166,7 +190,9 @@ class VirusWaveVisualizer2D:
         ax1.set_title('Wave evolution (comet)', fontweight='bold')
         ax1.set_xlabel('Antigenic (x)')
         ax1.set_ylabel('Antigenic (y)')
-        ax1.grid(True, alpha=0.3, linestyle='--')
+        ax1.grid(False)
+        ax1.spines['top'].set_visible(False)
+        ax1.spines['right'].set_visible(False)
         plt.colorbar(im1, ax=ax1)
         
         # Infected
@@ -188,7 +214,8 @@ class VirusWaveVisualizer2D:
         images = [im1, im2, im3]
 
         step_num_0 = self.extract_step_number(self.I_files[0])
-        fig.suptitle(f'Virus wave evolution - Step: {step_num_0}\n{self.params_title_str}', fontweight='bold')
+        year_0 = step_num_0 * self.TO_YEARS
+        fig.suptitle(f'Virus wave evolution - Year: {year_0:.1f}\n{self.params_title_str}', fontweight='bold')
         
         plt.tight_layout(rect=[0, 0, 1, 0.90])
         
@@ -204,8 +231,9 @@ class VirusWaveVisualizer2D:
             for im in images:
                 im.autoscale()
             
-            step_num = self.extract_step_number(self.I_files[frame])            
-            fig.suptitle(f'Virus wave evolution - Step: {step_num}\n{self.params_title_str}', fontweight='bold')
+            step_num = self.extract_step_number(self.I_files[frame]) 
+            year_val = step_num * self.TO_YEARS
+            fig.suptitle(f'Virus wave evolution - Year: {year_val:.1f}\n{self.params_title_str}', fontweight='bold')
             
             return images
         
