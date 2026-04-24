@@ -38,25 +38,46 @@ def get_params_string(data_dir):
         return f"{line1}\n{line2}"
     return line1
 
-def plot_timeseries(data_dir, output_dir, params_str):
+def get_to_years_factor(data_dir):
+    """
+    Parses dt from observables.txt and calculates the conversion factor from steps to years.
+    """
+    obs_file = os.path.join(data_dir, 'observables.txt')
+    dt = 0.5  # Значение по умолчанию
+    if os.path.exists(obs_file):
+        with open(obs_file, 'r') as f:
+            content = f.read()
+            match = re.search(r'dt\s*=\s*([0-9.]+)', content)
+            if match:
+                dt = float(match.group(1))
+                
+    DAYS_IN_CYCLE = 5.0
+    DAYS_IN_YEAR = 365.25
+    return (dt * DAYS_IN_CYCLE) / DAYS_IN_YEAR
+
+def plot_timeseries(data_dir, output_dir, params_str, to_years):
     ts_file = os.path.join(data_dir, 'timeseries.csv')
     if not os.path.exists(ts_file):
         print(f"[Warning] File not found: {ts_file}")
         return
 
     df = pd.read_csv(ts_file)
+    df['year'] = df['step'] * to_years # Конвертация
     
     plt.figure(figsize=(10, 6))
-    plt.plot(df['step'], df['total_i'], color='red', lw=2)
+    plt.plot(df['year'], df['total_i'], color='red', lw=2)
     
     # Добавляем параметры в заголовок
     title = 'Epidemic Dynamics: Total Fraction of Infected (finf)'
     if params_str: title += f'\n{params_str}'
     plt.title(title, fontsize=14)
     
-    plt.xlabel('Simulation Step', fontsize=14)
+    plt.xlabel('Time (years)', fontsize=14) # Обновленная подпись
     plt.ylabel('Fraction of Infected (total_i)', fontsize=14)
-    plt.grid(True, linestyle='--', alpha=0.7)
+    plt.grid(False)
+    ax = plt.gca()
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
     plt.tight_layout()
     
     out_file = os.path.join(output_dir, 'timeseries.png')
@@ -64,35 +85,48 @@ def plot_timeseries(data_dir, output_dir, params_str):
     plt.close()
     print(f"Timeseries plot saved: {out_file}")
 
-def plot_wave(data_dir, output_dir, params_str):
+def plot_wave(data_dir, output_dir, params_str, to_years):
     wave_file = os.path.join(data_dir, 'wave.csv')
     if not os.path.exists(wave_file):
         print(f"[Warning] File not found: {wave_file}")
         return
 
     df = pd.read_csv(wave_file)
+    df['year'] = df['step'] * to_years # Конвертация
     
     plt.figure(figsize=(14, 6))
     
-    depths = df['depth'].unique()
+    # Получаем отсортированный список уникальных глубин
+    depths = sorted(df['depth'].unique())
+    
+    # Используем срез [::3], чтобы взять каждый третий элемент
+    sparse_depths = depths[::2]
+    
     cmap = plt.get_cmap('tab20')
     
-    for idx, d in enumerate(sorted(depths)):
+    # Итерируемся только по разреженному списку
+    for idx, d in enumerate(sparse_depths):
         d_data = df[df['depth'] == d]
-        plt.plot(d_data['step'], d_data['i'], color=cmap(idx % 20), lw=1.5)
+        # Используем idx для цвета, чтобы палитра распределялась равномерно
+        plt.plot(d_data['year'], d_data['i'], color=cmap(idx % 20), lw=1.5)
         
     plt.yscale('log')
-    plt.ylim(1e-8, 1e-1) 
+    plt.ylim(1e-6, 1e-2)
+    
+    # Убираем границы (исправлено через gca)
+    ax = plt.gca()
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
     
     # Добавляем параметры в заголовок
     title = 'Evolution of Viral Lineages (Traveling Wave)'
     if params_str: title += f'\n{params_str}'
     plt.title(title, fontsize=14)
     
-    plt.xlabel('Simulation Step', fontsize=14)
+    plt.xlabel('Time (years)', fontsize=14) # Обновленная подпись
     plt.ylabel('Fraction of Infected (log)', fontsize=14)
     
-    plt.grid(True, which="both", linestyle='--', alpha=0.5)
+    plt.grid(False)
     plt.tight_layout()
     
     out_file = os.path.join(output_dir, 'traveling_wave.png')
@@ -216,7 +250,7 @@ def find_main_trunk(df):
                 
     return path_nodes, path_edges
 
-def plot_trees(data_dir, output_dir, params_str):
+def plot_trees(data_dir, output_dir, params_str, to_years):
     snapshot_files = glob.glob(os.path.join(data_dir, 'snapshot_*.csv'))
     
     def extract_step(filepath):
@@ -242,7 +276,10 @@ def plot_trees(data_dir, output_dir, params_str):
     for idx, file in enumerate(files_to_plot):
         ax = axes[idx]
         step = extract_step(file)
+        year_val = step * to_years # Конвертация текущего шага файла
+        
         df = pd.read_csv(file)
+        df['creation_year'] = df['creation_step'] * to_years # Конвертация координат по оси X
 
         node_y_dict = calculate_concentrated_layout(df)
         trunk_node_set, trunk_edge_set = find_main_trunk(df)
@@ -250,7 +287,7 @@ def plot_trees(data_dir, output_dir, params_str):
         coords = {}
         for _, row in df.iterrows():
             nid = int(row['id'])
-            coords[nid] = (row['creation_step'], node_y_dict[nid])
+            coords[nid] = (row['creation_year'], node_y_dict[nid]) # Используем creation_year вместо creation_step
 
         # 3 группы веток (ребер)
         extinct_edges = []
@@ -280,6 +317,8 @@ def plot_trees(data_dir, output_dir, params_str):
                     extinct_edges.append(v_segment)
                     extinct_edges.append(h_segment)
 
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
         # 1. Вымершие ветки
         lc_extinct = LineCollection(extinct_edges, colors='blue', alpha=0.3, linewidths=0.5)
         ax.add_collection(lc_extinct)
@@ -298,12 +337,12 @@ def plot_trees(data_dir, output_dir, params_str):
         is_healthy = (df['is_infected'] == 0) & (~df['id'].isin(trunk_node_set))
         is_trunk = df['id'].isin(trunk_node_set)
 
-        ax.scatter(df[is_healthy]['creation_step'], df[is_healthy]['y_coord'], color='blue', s=2, alpha=0.3) 
-        ax.scatter(df[is_infected]['creation_step'], df[is_infected]['y_coord'], color='red', s=2, alpha=1.0) 
-        ax.scatter(df[is_trunk]['creation_step'], df[is_trunk]['y_coord'], color='green', s=2, alpha=1.0)
+        ax.scatter(df[is_healthy]['creation_year'], df[is_healthy]['y_coord'], color='blue', s=2, alpha=0.3) 
+        ax.scatter(df[is_infected]['creation_year'], df[is_infected]['y_coord'], color='red', s=2, alpha=1.0) 
+        ax.scatter(df[is_trunk]['creation_year'], df[is_trunk]['y_coord'], color='green', s=2, alpha=1.0)
 
-        ax.set_title(f'Step: {step}', fontsize=14)
-        ax.set_xlabel('Time', fontsize=14)
+        ax.set_title(f'Year: {year_val:.1f}', fontsize=14) # Подпись текущего года
+        ax.set_xlabel('Time (years)', fontsize=14) # Подпись оси
         
         if idx % 2 == 0:
             ax.set_ylabel('Topological Shift (Active -> Up)', fontsize=14)
@@ -311,7 +350,9 @@ def plot_trees(data_dir, output_dir, params_str):
             ax.set_ylabel('')
             
         if not df.empty:
-            ax.set_xlim(-50, df['creation_step'].max() + 50)
+            # Масштабируем отступы оси X пропорционально коэффициенту
+            padding = 50 * to_years 
+            ax.set_xlim(-padding, df['creation_year'].max() + padding)
             ax.set_ylim(-1, max(node_y_dict.values()) * 1.05 + 1)
             
         if idx == 0:
@@ -344,10 +385,11 @@ def main():
 
     print("Starting plot generation...")
     params_str = get_params_string(args.data_dir)
+    to_years = get_to_years_factor(args.data_dir) # Вычисляем коэффициент
     
-    plot_timeseries(args.data_dir, args.output_dir, params_str)
-    plot_wave(args.data_dir, args.output_dir, params_str)
-    plot_trees(args.data_dir, args.output_dir, params_str)
+    plot_timeseries(args.data_dir, args.output_dir, params_str, to_years)
+    plot_wave(args.data_dir, args.output_dir, params_str, to_years)
+    plot_trees(args.data_dir, args.output_dir, params_str, to_years)
     
     print("Done!")
 
