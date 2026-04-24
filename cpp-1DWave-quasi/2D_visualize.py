@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib import ticker
 from matplotlib.animation import FuncAnimation, PillowWriter
 import os
 import glob
@@ -8,6 +9,18 @@ import argparse
 import pandas as pd
 from matplotlib.colors import LinearSegmentedColormap
 import matplotlib.gridspec as gridspec
+
+BASE_SIZE = 14
+plt.rcParams.update({
+    'font.size': BASE_SIZE,
+    'axes.titlesize': BASE_SIZE + 2,
+    'axes.labelsize': BASE_SIZE + 2,
+    'xtick.labelsize': BASE_SIZE - 2,
+    'ytick.labelsize': BASE_SIZE - 2,
+    'legend.fontsize': BASE_SIZE - 2,
+    'figure.titlesize': BASE_SIZE + 2,
+    'figure.dpi': 150
+})
 
 class VirusWaveVisualizer2D:
     def __init__(self, data_dir="out/data"):
@@ -18,6 +31,20 @@ class VirusWaveVisualizer2D:
 
         self.find_data_files()
         self.params_title_str = self.load_model_parameters_string()
+
+        # --- РАСЧЕТ КОЭФФИЦИЕНТА ДЛЯ ПЕРЕВОДА В ГОДЫ ---
+        DAYS_IN_CYCLE = 5.2
+        DAYS_IN_YEAR = 365.25
+        self.dt = 0.5  # Значение по умолчанию
+        
+        # Пытаемся вытащить dt из строки параметров с помощью регулярного выражения
+        match = re.search(r'dt\s*=\s*([0-9.]+)', self.params_title_str)
+        if match:
+            self.dt = float(match.group(1))
+            
+        # Формула: (шаги * dt) = циклы -> (циклы * 5) / 365.25 = годы
+        self.TO_YEARS = (self.dt * DAYS_IN_CYCLE) / DAYS_IN_YEAR
+        # -----------------------------------------------
 
         colors = ['#FFFFFF', '#87CEEB', '#32CD32', '#FFD700', '#FF4500', '#8B0000']
         self.wave_cmap = LinearSegmentedColormap.from_list('wave', colors, N=256)
@@ -61,66 +88,85 @@ class VirusWaveVisualizer2D:
         avg_finf = df['finf'].mean()
         obs_str = f"mean_finf={avg_finf:.2e}"
 
-        fig, ax = plt.subplots(figsize=(12, 7))
-        ax.plot(df['step'], df['finf'], 'r-', lw=1.5)
+        # --- ПРИМЕНЯЕМ ФОРМУЛУ ПЕРЕВОДА В ГОДЫ ---
+        df['year'] = df['step'] * self.TO_YEARS
+
+        fig, ax = plt.subplots(figsize=(14, 9))
+        
+        # Строим график от новой колонки 'year'
+        ax.plot(df['year'], df['finf'], 'r-', lw=2)
     
-        ax.set_xlabel('Time', fontsize=11)
-        ax.set_ylabel('Fraction infected (finf)', fontsize=11)
+        ax.set_xlabel('Time (years)') # Изменили подпись
+        ax.set_ylabel('Fraction infected (finf)')
     
         full_title = f"Fraction infected over time\n\n{self.params_title_str}\n\nObservables: {obs_str}"
-        ax.set_title(full_title, fontsize=11, pad=10)
+        ax.set_title(full_title, pad=20)
     
-        ax.grid(True, linestyle=':', alpha=0.6)
-        ax.set_xlim(df['step'].min() - 50, df['step'].max() + 50)
+        ax.grid(False)
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        
+        # Обновляем пределы графика по оси X
+        ax.set_xlim(df['year'].min(), df['year'].max())
 
         plt.tight_layout()
-        plt.savefig(save_path, dpi=150)
+        plt.savefig(save_path)
         plt.close(fig)
         print(f"Diagnostic plot saved as {save_path}")
 
     def create_wave_snapshot(self, step_indices=None, save_path="wave_snapshots.png"):
         if step_indices is None:
             total = len(self.I_files)
-            if total == 0:
-                print("No data for snapshot")
-                return
+            if total == 0: return
             step_indices = [0, total//3, 2*total//3, total-1]
             step_indices = [max(0, min(idx, total-1)) for idx in step_indices]
 
-        fig = plt.figure(figsize=(18, 7))
-        gs = gridspec.GridSpec(2, 4, wspace=0.4, hspace=0.1)
+        fig = plt.figure(figsize=(24, 11))
+        gs = gridspec.GridSpec(2, 4, wspace=0.075, hspace=0.075)
 
         for col, idx in enumerate(step_indices[:4]):
-            if idx >= len(self.I_files):
-                continue
-
             I = self.load_matrix(self.I_files[idx])
             R = self.load_matrix(self.R_files[idx])
             step_num = self.extract_step_number(self.I_files[idx])
+            
+            # Считаем текущий год для заголовка
+            year_val = step_num * self.TO_YEARS
 
+            # --- Ряд Infected ---
             ax_I = plt.subplot(gs[0, col])
             im_I = ax_I.imshow(I, cmap='Reds', aspect='auto', origin='lower', vmin=0)
-            ax_I.set_title(f'Step {step_num}', fontsize=12, fontweight='bold', pad=10)
-            
+            ax_I.set_title(f'Year {year_val:.1f}', fontweight='bold') # Подписываем годами
+            ax_I.set_xticks([])
             if col == 0:
-                ax_I.set_ylabel('Infected (I)\ny (neutral)', fontsize=11)
+                ax_I.set_ylabel('Infected (I)\ny (neutral)')
             
-            ax_I.tick_params(labelsize=8)
-            plt.colorbar(im_I, ax=ax_I, fraction=0.046, pad=0.04)
+            cbar_I = plt.colorbar(im_I, ax=ax_I)
+            cbar_I.ax.tick_params(labelsize=BASE_SIZE)
+        
+            fmt_I = ticker.ScalarFormatter(useMathText=False)
+            fmt_I.set_scientific(True)
+            fmt_I.set_powerlimits((0, 0))
+            cbar_I.ax.yaxis.set_major_formatter(fmt_I)
 
+            # --- Ряд Recovered ---
             ax_R = plt.subplot(gs[1, col])
             im_R = ax_R.imshow(R, cmap='Greens', aspect='auto', origin='lower', vmin=0)
-            ax_R.set_xlabel('x (antigenic)', fontsize=10)
-            
+            ax_R.set_xlabel('x (antigenic)')
             if col == 0:
-                ax_R.set_ylabel('Recovered (R)\ny (neutral)', fontsize=11)
-                #ax_R.set_ylabel('y (antigenic)', fontsize=9)
+                ax_R.set_ylabel('Recovered (R)\ny (neutral)')
                 
-            ax_R.tick_params(labelsize=8)
-            plt.colorbar(im_R, ax=ax_R, fraction=0.046, pad=0.04)
+            cbar_R = plt.colorbar(im_R, ax=ax_R)
+            cbar_R.ax.tick_params(labelsize=BASE_SIZE)
+        
+            fmt_R = ticker.ScalarFormatter(useMathText=False)
+            fmt_R.set_scientific(True)
+            fmt_R.set_powerlimits((0, 0))
+            cbar_R.ax.yaxis.set_major_formatter(fmt_R)
 
-        plt.suptitle(f'Wave Evolution: Infected (Top) vs Recovered (Bottom)\n{self.params_title_str}', fontsize=14, fontweight='bold', y=1.02)
-        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        fig.suptitle(f'Wave Evolution\n{self.params_title_str}', fontweight='bold', y=0.98)
+        plt.tight_layout(rect=[0, 0, 1, 1])
+
+        plt.savefig(save_path, bbox_inches='tight')
         plt.close(fig)
         print(f"Snapshot saved as {save_path}")
 
@@ -131,8 +177,8 @@ class VirusWaveVisualizer2D:
             
         total_frames = min(max_frames, len(self.I_files))
         
-        fig = plt.figure(figsize=(18, 6))
-        gs = gridspec.GridSpec(1, 3, width_ratios=[0.1, 0.1, 0.1])
+        fig = plt.figure(figsize=(22, 9))
+        gs = gridspec.GridSpec(1, 3, width_ratios=[1, 1, 1])
         
         I0 = self.load_matrix(self.I_files[0])
         R0 = self.load_matrix(self.R_files[0])
@@ -141,34 +187,37 @@ class VirusWaveVisualizer2D:
         ax1 = plt.subplot(gs[0])
         composite0 = I0 * 0.8 + R0 * 0.4
         im1 = ax1.imshow(composite0, cmap=self.wave_cmap, aspect='auto', origin='lower', interpolation='gaussian', animated=True)
-        ax1.set_title('Wave evolution (comet)', fontsize=12, fontweight='bold')
-        ax1.set_xlabel('Antigenic coordinate (x)')
-        ax1.set_ylabel('Antigenic coordinate (y)')
-        ax1.grid(True, alpha=0.3, linestyle='--')
-        plt.colorbar(im1, ax=ax1, label='Intensity')
+        ax1.set_title('Wave evolution (comet)', fontweight='bold')
+        ax1.set_xlabel('Antigenic (x)')
+        ax1.set_ylabel('Antigenic (y)')
+        ax1.grid(False)
+        ax1.spines['top'].set_visible(False)
+        ax1.spines['right'].set_visible(False)
+        plt.colorbar(im1, ax=ax1)
         
         # Infected
         ax2 = plt.subplot(gs[1])
         im2 = ax2.imshow(I0, cmap='Reds', aspect='auto', origin='lower', animated=True)
-        ax2.set_title('Infected', fontsize=12, fontweight='bold')
-        ax2.set_xlabel('Antigenic coordinate (x)')
-        ax2.set_ylabel('Antigenic coordinate (y)')
-        plt.colorbar(im2, ax=ax2, label='Infected density')
+        ax2.set_title('Infected', fontweight='bold')
+        ax2.set_xlabel('Antigenic (x)')
+        ax2.set_ylabel('Antigenic (y)')
+        plt.colorbar(im2, ax=ax2)
         
         # Susceptible
         ax3 = plt.subplot(gs[2])
         im3 = ax3.imshow(R0, cmap='Greens', aspect='auto', origin='lower', animated=True)
-        ax3.set_title('Recovered', fontsize=12, fontweight='bold')
-        ax3.set_xlabel('Antigenic coordinate (x)')
-        ax3.set_ylabel('Antigenic coordinate (y)')
-        plt.colorbar(im3, ax=ax3, label='Susceptible density')
+        ax3.set_title('Recovered', fontweight='bold')
+        ax3.set_xlabel('Antigenic (x)')
+        ax3.set_ylabel('Antigenic (y)')
+        plt.colorbar(im3, ax=ax3)
         
         images = [im1, im2, im3]
 
         step_num_0 = self.extract_step_number(self.I_files[0])
-        fig.suptitle(f'Virus wave evolution - Step: {step_num_0}\n\n{self.params_title_str}', fontsize=14, fontweight='bold')
+        year_0 = step_num_0 * self.TO_YEARS
+        fig.suptitle(f'Virus wave evolution - Year: {year_0:.1f}\n{self.params_title_str}', fontweight='bold')
         
-        plt.tight_layout(rect=[0, 0, 1, 0.98])
+        plt.tight_layout(rect=[0, 0, 1, 0.90])
         
         def update(frame):
             I = self.load_matrix(self.I_files[frame])
@@ -182,9 +231,9 @@ class VirusWaveVisualizer2D:
             for im in images:
                 im.autoscale()
             
-            step_num = self.extract_step_number(self.I_files[frame])            
-            
-            fig.suptitle(f'Virus wave evolution - Step: {step_num}\n\n{self.params_title_str}', fontsize=14, fontweight='bold')
+            step_num = self.extract_step_number(self.I_files[frame]) 
+            year_val = step_num * self.TO_YEARS
+            fig.suptitle(f'Virus wave evolution - Year: {year_val:.1f}\n{self.params_title_str}', fontweight='bold')
             
             return images
         
